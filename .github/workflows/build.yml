@@ -15,10 +15,9 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # 三平台各自在原生 runner 上构建，这不是偷懒，是硬约束：
+    # 两个平台各自在原生 runner 上构建，这不是偷懒，是硬约束：
     #   - Windows 包只能在 Windows 上打（NSIS / signtool）
     #   - Linux AppImage 需要创建文件软链，Windows 普通用户没有该权限
-    #   - macOS 包只能在 macOS 上打，electron-builder 会直接拒绝跨平台
     strategy:
       fail-fast: false
       matrix:
@@ -35,11 +34,6 @@ jobs:
             files: |
               release/*.AppImage
               release/*.tar.gz
-          - name: macos-x64-arm64
-            os: macos-latest
-            script: npm run dist:mac
-            artifact: LaunchPlay-macos
-            files: release/*.zip
 
     steps:
       - name: Checkout
@@ -60,8 +54,7 @@ jobs:
       - name: Build
         run: ${{ matrix.script }}
         env:
-          # 没有 Apple 证书时不要让 electron-builder 去自动查找签名身份，
-          # ad-hoc 签名交给 tools/after-pack.js 在 afterPack 阶段完成
+          # 本项目不做代码签名，别让 electron-builder 自动去翻系统证书
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact
