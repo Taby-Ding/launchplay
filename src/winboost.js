@@ -186,6 +186,28 @@ function failAll(reason) {
   pending.clear();
 }
 
+/* ---- 闲置回收 ----
+ * 辅助进程是个常驻 powershell.exe, 空转也要占 60~90MB。
+ * 电视首页通常整天挂着, 一直占着这笔内存不划算: 连续 10 分钟没有窗口增强请求
+ * 就结束它, 下次真正要用时再拉起(冷启动约 3.5s, 但那种情况本身已经很少见)。
+ */
+const IDLE_MS = 10 * 60 * 1000;
+let lastUsed = 0;
+let idleTimer = null;
+
+function touchWorker() {
+  lastUsed = Date.now();
+  if (idleTimer) return;
+  idleTimer = setInterval(() => {
+    if (!worker) { clearInterval(idleTimer); idleTimer = null; return; }
+    if (Date.now() - lastUsed < IDLE_MS) return;
+    shutdownWorker();
+    clearInterval(idleTimer);
+    idleTimer = null;
+  }, 60 * 1000);
+  if (idleTimer.unref) idleTimer.unref();
+}
+
 function startWorker() {
   if (starting) return starting;
   starting = new Promise((resolve) => {
@@ -212,7 +234,7 @@ function startWorker() {
         const line = buf.slice(0, idx).trim();
         buf = buf.slice(idx + 1);
         if (!line) continue;
-        if (line === 'READY') { ready = true; resolve(child); continue; }
+        if (line === 'READY') { ready = true; touchWorker(); resolve(child); continue; }
         const sp = line.indexOf(' ');
         const id = sp < 0 ? line : line.slice(0, sp);
         const rest = sp < 0 ? '' : line.slice(sp + 1);
@@ -258,6 +280,7 @@ async function boostWindow(pid, opts = {}) {
 
   const w = worker && ready ? worker : await startWorker();
   if (!w) return { ok: false, info: 'worker unavailable' };
+  touchWorker();
 
   const id = 'r' + (++seq);
   return new Promise((resolve) => {
@@ -283,6 +306,7 @@ async function warmup() {
 
 /** 应用退出前调用, 顺手结束辅助进程 */
 function shutdownWorker() {
+  if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
   if (!worker) return;
   try { worker.stdin.write('QUIT\n'); } catch {}
   const w = worker;

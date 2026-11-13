@@ -1,4 +1,9 @@
-// 生成应用图标 build/icon.ico —— 蓝青渐变圆角方块 + 2x2 磁贴, 4 倍超采样抗锯齿
+// 生成应用图标 build/icon.ico —— 深蓝渐变圆角方块 + 2x2 磁贴, 4 倍超采样抗锯齿
+//
+// 尺寸按「目标像素」写, 内部统一乘 SS 换算到超采样坐标系 —— 之前直接用超采样坐标,
+// 改参数时很难判断实际效果, 结果磁贴几乎顶满底板: 缩到 24px 时白块之间的蓝缝只剩
+// 不到 1px, 整个图标糊成一个白方块, 在浅色任务栏上看起来就是「空白图标」。
+// 现在留出足够的蓝边 + 深色描边, 保证 16/24/32px 下依然能认出四个磁贴。
 const fs = require('fs');
 const path = require('path');
 const { encodePNG } = require('../src/peicon');
@@ -6,6 +11,7 @@ const { encodePNG } = require('../src/peicon');
 const SS = 4;            // 超采样倍数
 const OUT = 256;         // 目标尺寸
 const N = OUT * SS;
+const PX = (v) => v * SS;
 
 const canvas = new Float32Array(N * N * 4); // RGBA 0..1
 
@@ -31,11 +37,12 @@ function blend(i, r, g, b, a) {
   canvas[i + 3] = na;
 }
 
-/** 以 SDF 覆盖率绘制一个圆角矩形 */
+/** 以 SDF 覆盖率绘制一个圆角矩形, 参数均为目标像素 */
 function drawRoundRect(cx, cy, hw, hh, r, colorAt) {
+  const CX = PX(cx), CY = PX(cy), HW = PX(hw), HH = PX(hh), R = PX(r);
   for (let y = 0; y < N; y++) {
     for (let x = 0; x < N; x++) {
-      const d = sdRoundRect(x + 0.5, y + 0.5, cx, cy, hw, hh, r);
+      const d = sdRoundRect(x + 0.5, y + 0.5, CX, CY, HW, HH, R);
       const cov = clamp01(0.5 - d * SS / 2);
       if (cov <= 0) continue;
       const [r0, g0, b0, a0] = colorAt(x, y);
@@ -44,29 +51,37 @@ function drawRoundRect(cx, cy, hw, hh, r, colorAt) {
   }
 }
 
-const C = N / 2;
-// 1) 底板: 圆角方块 + 对角渐变
-drawRoundRect(C, C, C - 8 * SS, C - 8 * SS, 190 * SS / 4, (x, y) => {
+const C = OUT / 2;       // 128
+const MARGIN = 5;        // 外边距
+const RADIUS = 56;       // 圆角半径 (Windows 大图标观感)
+const BORDER = 3;        // 深色描边, 浅色任务栏上也留得住轮廓
+
+// 1) 描边层: 比底板大 BORDER, 形成一圈很深的蓝, 避免图标在浅色背景上「无边」
+drawRoundRect(C, C, C - MARGIN, C - MARGIN, RADIUS, () => [0.016, 0.043, 0.09, 0.96]);
+
+// 2) 底板: 左上深蓝 -> 右下亮蓝的对角渐变
+drawRoundRect(C, C, C - MARGIN - BORDER, C - MARGIN - BORDER, RADIUS - BORDER * 0.7, (x, y) => {
   const t = (x / N) * 0.55 + (y / N) * 0.45;
-  const r = (0.16 + (0.10 - 0.16) * t);
-  const g = (0.45 + (0.72 - 0.45) * t);
-  const b = (0.95 + (0.90 - 0.95) * t);
+  const r = 0.055 + (0.125 - 0.055) * t;
+  const g = 0.20 + (0.53 - 0.20) * t;
+  const b = 0.42 + (0.88 - 0.42) * t;
   return [r, g, b, 1];
 });
 
-// 2) 2x2 磁贴 (右下角一块做成半透明, 更像"启动台")
-const pad = 56 * SS / 4;
-const gap = 18 * SS / 4;
-const cell = (N - pad * 2 - gap) / 2;
-const tr = cell * 0.26;
+// 3) 2x2 磁贴 (右下角一块半透明, 更像「启动台」)
+//    pad 从 14px 加大到 34px, 蓝边占满一圈, 小尺寸下才不会糊成白方块
+const PAD = 34;
+const GAP = 11;
+const CELL = (OUT - PAD * 2 - GAP) / 2;   // 88.5
+const TR = CELL * 0.24;
 const cells = [
-  [pad + cell / 2, pad + cell / 2, 1],
-  [pad + cell * 1.5 + gap, pad + cell / 2, 1],
-  [pad + cell / 2, pad + cell * 1.5 + gap, 1],
-  [pad + cell * 1.5 + gap, pad + cell * 1.5 + gap, 0.45],
+  [PAD + CELL / 2, PAD + CELL / 2, 1],
+  [PAD + CELL * 1.5 + GAP, PAD + CELL / 2, 1],
+  [PAD + CELL / 2, PAD + CELL * 1.5 + GAP, 1],
+  [PAD + CELL * 1.5 + GAP, PAD + CELL * 1.5 + GAP, 0.42],
 ];
 for (const [cx, cy, alpha] of cells) {
-  drawRoundRect(cx, cy, cell / 2, cell / 2, tr, () => [1, 1, 1, alpha]);
+  drawRoundRect(cx, cy, CELL / 2, CELL / 2, TR, () => [1, 1, 1, alpha]);
 }
 
 /* ---- 降采样 ---- */
@@ -151,5 +166,20 @@ const outDir = path.join(__dirname, '..', 'build');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, 'icon.ico'), ico);
 // 同时留一张 png 便于预览
-fs.writeFileSync(path.join(outDir, 'icon.png'), encodePNG(256, 256, downsample(256)));
+const png = encodePNG(256, 256, downsample(256));
+fs.writeFileSync(path.join(outDir, 'icon.png'), png);
+
+// 运行时窗口图标必须放在会被打进 app.asar 的目录里 —— build/ 是 electron-builder
+// 的 buildResources 目录, 不会进包, 之前直接把 BrowserWindow.icon 指向它,
+// 打包后路径不存在, 任务栏就成了空白图标。
+//
+// 而且只能用 PNG: Electron 的 nativeImage 读 ICO 时会把底板的 alpha 丢掉,
+// 任务栏上只剩几个白点(在浅色任务栏里等于空白)。ICO 留给 exe 资源,
+// Windows 的 shell 自己解析, 那条路是正常的。
+const assetsDir = path.join(__dirname, '..', 'src', 'assets');
+fs.mkdirSync(assetsDir, { recursive: true });
+fs.writeFileSync(path.join(assetsDir, 'icon.png'), png);
+fs.writeFileSync(path.join(assetsDir, 'icon.ico'), ico);
+
 console.log('icon.ico', (ico.length / 1024).toFixed(1) + 'KB', 'sizes:', sizes.join(','));
+console.log('icon.png', (png.length / 1024).toFixed(1) + 'KB  (窗口图标用)');

@@ -1512,6 +1512,10 @@ async function repairIcons() {
   applySettings();
   updateClock();
   setInterval(updateClock, 1000);
+  // 窗口被应用完全遮挡时定时器会被节流, 重新可见时补一次, 免得时钟停在旧时间
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) updateClock();
+  });
   renderGrid();
 
   // 按钮

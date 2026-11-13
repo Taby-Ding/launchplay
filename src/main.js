@@ -20,6 +20,26 @@ const isDev = !app.isPackaged;
 const CAPTURE = process.env.TL_CAPTURE || '';
 const CAPTURE_FULLSCREEN = process.env.TL_CAPTURE_FS === '1';
 
+/* ------------------------- 进程配置 ------------------------- */
+/**
+ * 任务栏分组标识。Windows 靠 AUMID + exe 路径索引任务栏按钮与图标缓存,
+ * 便携版每次运行都解压到新的临时目录, 不显式指定 AUMID 时图标缓存会落空,
+ * 任务栏就显示成空白方块。
+ */
+const APP_ID = 'com.launchplay.desktop';
+app.setAppUserModelId(APP_ID);
+
+/**
+ * 内存相关。
+ * Chromium 天然是多进程(主进程 / GPU / 渲染 / 网络 / 崩溃上报), 任务管理器里每行
+ * 还会把共享的 DLL(v8、skia、GL)各算一遍, 所以相加出来的数字远大于真实占用。
+ *
+ * 试过把 GPU 进程并进主进程(--in-process-gpu): 进程数能从 4 降到 3,
+ * 但这台机器上窗口会创建成功却始终不显示, 所以不能要。
+ * 真正安全有效的只有限制 V8 老生代上限, 以及让被遮挡时降低渲染频率。
+ */
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=192');
+
 /* ------------------------- 数据目录 ------------------------- */
 /**
  * 便携版优先把数据放在 exe 同级目录, 真正做到「拷走就能用」;
@@ -140,6 +160,29 @@ function importBackground(srcPath) {
 }
 
 /* ------------------------- 窗口 ------------------------- */
+/**
+ * 窗口图标路径。
+ *
+ * 两个坑都在这里踩过：
+ *  1. 原来指向 build/icon.ico —— 那是 electron-builder 的 buildResources 目录,
+ *     不会被打进 app.asar, 打包后路径不存在, 任务栏只剩一个空白方块。
+ *  2. 改用 asar 内的 icon.ico 仍然空白: Electron 的 nativeImage 读 ICO 时会丢掉
+ *     底板的 alpha, 任务栏上只剩四个白点, 浅色主题下看着就是空的。
+ *     换成 PNG 就正常了, 所以窗口图标优先 PNG; ICO 继续留给 exe 资源,
+ *     Windows shell 自己解析那条路没有问题。
+ */
+function appIconPath() {
+  const candidates = [
+    path.join(__dirname, 'assets', 'icon.png'),
+    path.join(__dirname, '..', 'build', 'icon.png'), // 开发模式兜底
+    path.join(__dirname, 'assets', 'icon.ico'),
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch { /* 路径不可读就试下一个 */ }
+  }
+  return undefined;
+}
+
 function createWindow() {
   const fullscreen = store.settings.fullscreen !== false;
 
@@ -154,14 +197,15 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#05070c',
     title: '影音快启 LaunchPlay',
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+    icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
-      backgroundThrottling: false,
+      // 被别的窗口完全遮住时(应用已启动)降低渲染频率, 省 CPU/GPU 与一部分内存
+      backgroundThrottling: true,
       devTools: isDev || !!CAPTURE,
     },
   });
@@ -611,10 +655,11 @@ if (!gotLock) {
       } catch { /* 热键被占用时试下一个 */ }
     }
 
-    // 预热窗口增强用的辅助进程, 让第一次启动应用不用等
+    // 预热窗口增强用的辅助进程, 让第一次启动应用不用等。
+    // 延后到首屏稳定之后再拉起, 避免启动瞬间和渲染争内存
     setTimeout(() => {
       if (store.settings.boostLaunch !== false) warmBoost();
-    }, 1800);
+    }, 5000);
 
     // 自愈: 让注册表里的自启项与实际设置保持一致
     getAutostart().then((cur) => {
