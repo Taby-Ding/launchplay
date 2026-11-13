@@ -7,31 +7,24 @@
 
 ## 1.0.0
 
-首个公开发布版本：**Windows / macOS / Linux 三平台同时支持**。
+首个公开发布版本：**Windows / Linux 双平台支持**。
 
 ### 新增
 
-- **macOS 支持**（x64 与 Apple Silicon 分别发包）
-  - `.app` 应用包直接添加，自动从 `Info.plist` 读出显示名
-  - 图标从包内 `.icns` 取最大的一张（`ic07`~`ic14` 本身就是 PNG，无需处理老式 RLE）
-  - 开机自启写入 `~/Library/LaunchAgents/com.launchplay.desktop.plist`
-  - 关机 / 重启走 AppleScript（首次会弹一次系统授权）
-  - 保留最小应用菜单，否则 `Cmd+C / Cmd+V / Cmd+A` 在输入框里会失效
 - **Linux 支持**（AppImage 与 tar.gz）
   - `.desktop` 启动项直接添加，解析 `Exec=` 得到真实命令与参数
   - 图标按 freedesktop 规范到图标主题目录里找（`<root>/<主题>/<尺寸>/apps/`），png 与 svg 都支持
   - 开机自启写入 `~/.config/autostart/launchplay.desktop`
   - 关机 / 重启走 `systemctl`
   - AppImage 场景下数据写在 AppImage 同级目录；不可写时退到 `~/.config/LaunchPlay`
-- **平台能力表** `src/platform.js`：三平台差异集中在一处，界面据此调整文案与可选项，业务代码里不再散落 `process.platform`
+- **平台能力表** `src/platform.js`：平台差异集中在一处，界面据此调整文案与可选项，业务代码里不再散落 `process.platform`
 
 ### 变更
 
 - **版本号收敛为 1.0.0**，旧的构建产物与历史版本目录已清除
 - **产物命名统一**：`LaunchPlay-<版本>-<平台>-<架构>.<扩展名>`，一眼能看出是哪个平台
 - **图标只有一个源**：`build/icon.png`（512×512，由 `npm run icon` 现场绘制），Windows 另出 `build/icon.ico`，运行时窗口图标用打进 asar 的 `src/assets/icon.png`
-- **CI 改为三平台矩阵**：Windows / Ubuntu / macOS 各自在原生 runner 上构建，tag 推送时统一挂到同一个 Release
-- macOS 产物在无人值守情况下自动做 ad-hoc 签名（`codesign -s -`），Apple Silicon 上不会直接报"已损坏"
+- **CI 改为平台矩阵**：Windows / Ubuntu 各自在原生 runner 上构建，tag 推送时统一挂到同一个 Release
 
 ### 保留（1.0 之前完成、本版本一并发布）
 
@@ -40,14 +33,13 @@
 - 拖动排序（超过 8px 才进入拖动，不影响单击启动）
 - 自定义背景图片：暗度四档、虚化开关、恢复默认壁纸；图片复制进数据目录，原图挪走不裂
 - 内置电视渐变壁纸，开箱即有客厅感
-- 高清图标：Windows 从 PE 资源取 256×256 原图；macOS 取 `.icns` 最大一张；Linux 取主题里最大尺寸
+- 高清图标：Windows 从 PE 资源取 256×256 原图；Linux 取主题里最大尺寸
 - Windows 快捷方式图标修复：自写 Shell Link 解析，1.4ms 拿到真实目标（原 PowerShell 方案 2.4s 且会静默失败）
 - Windows 窗口增强：常驻 PowerShell 辅助进程，新窗口铺满 + 置顶，闲置 10 分钟自动退出
 - 全局热键 `Ctrl+Alt+L` 唤回 / 收起启动台
-- 开机自启三平台均为一键开关，失败不破坏开关状态
+- 开机自启两个平台均为一键开关，失败不破坏开关状态
 
 ### 已知限制
 
-- macOS / Linux 没有"把别的程序变成全屏"的等价接口，设置里该项标注为仅 Windows 支持
-- macOS 包未做代码签名与公证，首次打开需右键→打开
+- Linux 没有"把别的程序变成全屏"的等价接口，设置里该项标注为仅 Windows 支持
 - Linux 上只在非标准路径提供图标的少数应用会退化为字母磁贴
