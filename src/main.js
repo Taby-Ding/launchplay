@@ -59,6 +59,7 @@ function resolveDataDir() {
 
 const DATA_DIR = resolveDataDir();
 const ICON_DIR = path.join(DATA_DIR, 'icons');
+const BG_DIR = path.join(DATA_DIR, 'backgrounds');
 
 let store = null;
 let icons = null;
@@ -74,24 +75,68 @@ function iconUrl(fileName) {
   return fileName ? `tlapp://icon/${encodeURIComponent(fileName)}` : '';
 }
 
+function bgUrl(fileName) {
+  return fileName ? `tlapp://bg/${encodeURIComponent(fileName)}` : '';
+}
+
+const MIME_BY_EXT = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+};
+
+/**
+ * tlapp://icon/<文件名>  —— 程序图标
+ * tlapp://bg/<文件名>    —— 自定义背景图
+ * 只允许访问各自数据目录下的文件(basename 去掉任何路径成分, 防目录穿越)
+ */
 function registerIconProtocol() {
   protocol.handle('tlapp', async (req) => {
     try {
       const u = new URL(req.url);
+      const host = (u.hostname || 'icon').toLowerCase();
+      const rootDir = host === 'bg' ? BG_DIR : ICON_DIR;
       const name = path.basename(decodeURIComponent(u.pathname));
-      const full = path.join(ICON_DIR, name);
-      if (!full.startsWith(ICON_DIR)) return new Response('forbidden', { status: 403 });
+      const full = path.join(rootDir, name);
+      if (!full.startsWith(rootDir)) return new Response('forbidden', { status: 403 });
       const buf = fs.readFileSync(full);
-      const ext = path.extname(name).toLowerCase();
-      const type = ext === '.png' ? 'image/png'
-        : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-          : ext === '.webp' ? 'image/webp'
-            : ext === '.gif' ? 'image/gif' : 'application/octet-stream';
+      const type = MIME_BY_EXT[path.extname(name).toLowerCase()] || 'application/octet-stream';
       return new Response(new Uint8Array(buf), { headers: { 'content-type': type, 'cache-control': 'max-age=604800' } });
     } catch {
       return new Response('not found', { status: 404 });
     }
   });
+}
+
+/* ------------------------- 背景图片 ------------------------- */
+const BG_MAX_BYTES = 40 * 1024 * 1024;
+
+/**
+ * 把用户选的图片复制进数据目录, 并清掉上一张, 避免数据目录膨胀。
+ * 不直接引用原路径: 图片放在桌面/U 盘时, 挪走或删除后背景会裂。
+ */
+function importBackground(srcPath) {
+  try {
+    const ext = path.extname(srcPath).toLowerCase();
+    if (!MIME_BY_EXT[ext] || ext === '.ico') return { ok: false, error: '这个格式不能用作背景，请选 PNG / JPG / WEBP' };
+    const st = fs.statSync(srcPath);
+    if (!st.isFile()) return { ok: false, error: '不是一个文件' };
+    if (st.size > BG_MAX_BYTES) return { ok: false, error: '图片超过 40 MB，请先压缩再试' };
+    fs.mkdirSync(BG_DIR, { recursive: true });
+    const name = `bg-${Date.now().toString(36)}${ext}`;
+    fs.copyFileSync(srcPath, path.join(BG_DIR, name));
+    for (const f of fs.readdirSync(BG_DIR)) {
+      if (f === name) continue;
+      try { fs.rmSync(path.join(BG_DIR, f), { force: true }); } catch { /* 被占用就留着 */ }
+    }
+    return { ok: true, file: name, url: bgUrl(name) };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '读取图片失败' };
+  }
 }
 
 /* ------------------------- 窗口 ------------------------- */
@@ -421,6 +466,30 @@ function setupIpc() {
       const f = icons.importImage(p);
       return f ? iconUrl(f) : '';
     } catch { return ''; }
+  });
+
+  /**
+   * 背景图片: 复制一份到数据目录再引用。
+   * 不能直接用原路径 —— 用户可能把图片放在桌面/U 盘, 移动或删除后就裂图了。
+   */
+  ipcMain.handle('bg:pick', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: '选择背景图片',
+      buttonLabel: '用作背景',
+      properties: ['openFile', 'dontAddToRecent'],
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+    return importBackground(r.filePaths[0]);
+  });
+
+  ipcMain.handle('bg:clear', () => {
+    try {
+      for (const f of fs.readdirSync(BG_DIR)) {
+        try { fs.rmSync(path.join(BG_DIR, f), { force: true }); } catch { /* 忽略 */ }
+      }
+    } catch { /* 目录不存在 */ }
+    return { ok: true };
   });
 
   /**

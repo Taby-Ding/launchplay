@@ -18,6 +18,7 @@ const state = {
   settings: {
     autostart: false, fullscreen: true, sound: true,
     tileSize: 'normal', hideHints: false,
+    background: { file: '', dim: 0.45, blur: false },
   },
   firstRun: true,
   dataDir: '',
@@ -250,11 +251,57 @@ function updateClock() {
 }
 
 /* ------------------------- 设置应用 ------------------------- */
+/** 背景暗度档位: 0 原图 / 越暗文字越清楚 */
+const BG_DIM_STEPS = [0, 0.25, 0.45, 0.65];
+
+function bgSettings() {
+  const b = state.settings.background || {};
+  return {
+    file: b.file || '',
+    dim: typeof b.dim === 'number' ? b.dim : 0.45,
+    blur: !!b.blur,
+  };
+}
+
+function applyBackground() {
+  const bg = bgSettings();
+  const photo = $('#bgPhoto');
+  const scrim = $('#bgScrim');
+  if (!photo || !scrim) return;
+  const on = !!bg.file;
+
+  if (on) {
+    const url = `tlapp://bg/${encodeURIComponent(bg.file)}`;
+    photo.style.backgroundImage = `url("${url}")`;
+    photo.classList.add('on');
+    document.body.classList.add('has-bg');
+
+    // 图片被手动删掉/损坏时, 别留一层压暗的黑罩 —— 自动退回默认背景
+    const probe = new Image();
+    probe.onerror = () => {
+      if (bgSettings().file !== bg.file) return;
+      state.settings.background = { ...bgSettings(), file: '' };
+      applyBackground();
+      persist();
+    };
+    probe.src = url;
+  } else {
+    photo.classList.remove('on');
+    document.body.classList.remove('has-bg');
+    // 等淡出动画结束再清掉, 避免图片"闪一下"
+    setTimeout(() => { if (!bgSettings().file) photo.style.backgroundImage = ''; }, 620);
+  }
+  photo.classList.toggle('blur', on && bg.blur);
+  scrim.style.display = on ? '' : 'none';
+  document.documentElement.style.setProperty('--bg-dim', String(bg.dim));
+}
+
 function applySettings() {
   const s = state.settings;
   document.documentElement.dataset.size = s.tileSize || 'normal';
   $('#hintbar').classList.toggle('hide', !!s.hideHints);
   state.isFullscreen = s.fullscreen !== false;
+  applyBackground();
 }
 
 /* ------------------------- 渲染 ------------------------- */
@@ -295,6 +342,10 @@ function makeTile(item) {
   name.textContent = item.name;
 
   el.append(wrap, name);
+  // 鼠标按下就把焦点移过来 —— 点开的那个磁贴必须保持高亮,
+  // 否则高亮还停在键盘选中的旧磁贴上, 看起来像"没选中就打开了"
+  el.addEventListener('pointerdown', () => Focus.set(el, { noScroll: true }));
+  el.addEventListener('mouseenter', () => hoverFocus(el));
   el.addEventListener('click', () => launchItem(item));
   el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openEdit(item); });
   return el;
@@ -312,6 +363,8 @@ function makeAddTile() {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
     </div>
     <div class="tile-name">添加应用</div>`;
+  el.addEventListener('pointerdown', () => Focus.set(el, { noScroll: true }));
+  el.addEventListener('mouseenter', () => hoverFocus(el));
   el.addEventListener('click', openAdd);
   return el;
 }
@@ -333,6 +386,9 @@ function renderGrid() {
 /* ------------------------- 启动 / 电源 ------------------------- */
 async function launchItem(item) {
   if (!item) return;
+  // 兜底: 不管从哪条路径触发启动, 都让被启动的磁贴保持高亮
+  const tile = $(`#grid [data-id="${item.id}"]`);
+  if (tile && Focus.el !== tile) Focus.set(tile, { noScroll: true });
   confirmSound();
   const t = toast(`正在启动 · ${item.name}`, 'ok', 1600);
   const r = await api.launch(item);
@@ -731,6 +787,7 @@ function openEdit(item) {
    ========================================================= */
 async function openSettings() {
   const s = state.settings;
+  const bg = bgSettings();
   openModal(`
     <div class="m-head">
       <div>
@@ -782,12 +839,41 @@ async function openSettings() {
         </div>
         <div class="switch ${s.hideHints ? 'on' : ''}"></div>
       </div>
+      <div class="section-label" style="margin-top:14px;padding-left:14px">外观</div>
       <div class="setting" data-focusable data-cycle="tileSize">
         <div class="setting-text">
           <div class="setting-name">图标尺寸</div>
           <div class="setting-desc">按屏幕大小选择更合适的磁贴密度</div>
         </div>
         <div class="badge" id="tileSizeBadge">${{ compact: '紧凑', normal: '标准', large: '大' }[s.tileSize] || '标准'}</div>
+      </div>
+      <div class="setting" data-focusable data-action="pickBg">
+        <div class="setting-text">
+          <div class="setting-name">背景图片</div>
+          <div class="setting-desc">用一张自己的图片当客厅墙纸，自动铺满整个屏幕</div>
+        </div>
+        <div class="badge" id="bgPicBadge">${bg.file ? '更换' : '选择'}</div>
+      </div>
+      <div class="setting" data-focusable data-cycle="bgDim">
+        <div class="setting-text">
+          <div class="setting-name">背景暗度</div>
+          <div class="setting-desc">压暗照片，让磁贴和文字更清楚（0% 为原图）</div>
+        </div>
+        <div class="badge" id="bgDimBadge">${Math.round(bg.dim * 100)}%</div>
+      </div>
+      <div class="setting" data-focusable data-toggle="bgBlur">
+        <div class="setting-text">
+          <div class="setting-name">背景虚化</div>
+          <div class="setting-desc">轻微模糊背景，磁贴轮廓更突出</div>
+        </div>
+        <div class="switch ${bg.blur ? 'on' : ''}" id="bgBlurSwitch"></div>
+      </div>
+      <div class="setting" data-focusable data-action="clearBg" id="bgRemoveRow" style="display:${bg.file ? '' : 'none'}">
+        <div class="setting-text">
+          <div class="setting-name" style="color:#ffb4b6">移除背景图片</div>
+          <div class="setting-desc">恢复默认的深色渐变背景</div>
+        </div>
+        <div class="badge">移除</div>
       </div>
 
       <div class="section-label" style="margin-top:14px;padding-left:14px">其它</div>
@@ -826,13 +912,18 @@ async function openSettings() {
 function bindSettingsRows() {
   const root = $('#modal');
 
+  // 点哪一行, 高亮就落在哪一行(与磁贴保持一致)
+  $$('.setting[data-toggle], .setting[data-cycle], .setting[data-action]', root).forEach((row) => {
+    row.addEventListener('pointerdown', () => Focus.set(row, { noScroll: true }));
+  });
+
   $$('.setting[data-toggle]', root).forEach((row) => {
     row.addEventListener('click', () => toggleSetting(row.dataset.toggle, row));
     row.addEventListener('mouseenter', () => hoverFocus(row));
   });
 
   $$('.setting[data-cycle]', root).forEach((row) => {
-    row.addEventListener('click', () => cycleTileSize(row));
+    row.addEventListener('click', () => cycleSetting(row));
     row.addEventListener('mouseenter', () => hoverFocus(row));
   });
 
@@ -844,6 +935,19 @@ function bindSettingsRows() {
 
 async function toggleSetting(key, row) {
   const sw = row.querySelector('.switch');
+
+  // 背景虚化存在 settings.background 里, 单独处理
+  if (key === 'bgBlur') {
+    const bg = bgSettings();
+    const nextBlur = !bg.blur;
+    state.settings.background = { ...bg, blur: nextBlur };
+    applyBackground();
+    sw.classList.toggle('on', nextBlur);
+    confirmSound();
+    await persist();
+    return;
+  }
+
   const next = key === 'autostart'
     ? !state.settings.autostart
     : key === 'fullscreen' ? !(state.settings.fullscreen !== false)
@@ -873,7 +977,23 @@ async function toggleSetting(key, row) {
   await persist();
 }
 
-function cycleTileSize(row) {
+/** 循环切换类设置: 图标尺寸 / 背景暗度 */
+function cycleSetting(row) {
+  const key = row.dataset.cycle;
+
+  if (key === 'bgDim') {
+    const bg = bgSettings();
+    const i = BG_DIM_STEPS.findIndex((v) => Math.abs(v - bg.dim) < 0.001);
+    const nextDim = BG_DIM_STEPS[(i + 1) % BG_DIM_STEPS.length];
+    state.settings.background = { ...bg, dim: nextDim };
+    applyBackground();
+    const badge = $('#bgDimBadge');
+    if (badge) badge.textContent = Math.round(nextDim * 100) + '%';
+    persist();
+    confirmSound();
+    return;
+  }
+
   const order = ['compact', 'normal', 'large'];
   const cur = order.indexOf(state.settings.tileSize || 'normal');
   const next = order[(cur + 1) % order.length];
@@ -886,7 +1006,49 @@ function cycleTileSize(row) {
   renderGrid();
 }
 
+/** 设置面板里的背景相关显示同步(选/移除图片后不重建面板, 避免丢失滚动位置) */
+function syncBgRows() {
+  const bg = bgSettings();
+  const pic = $('#bgPicBadge');
+  if (pic) pic.textContent = bg.file ? '更换' : '选择';
+  const dim = $('#bgDimBadge');
+  if (dim) dim.textContent = Math.round(bg.dim * 100) + '%';
+  const sw = $('#bgBlurSwitch');
+  if (sw) sw.classList.toggle('on', bg.blur);
+  const rm = $('#bgRemoveRow');
+  if (rm) rm.style.display = bg.file ? '' : 'none';
+}
+
+async function pickBackground() {
+  let r = null;
+  try {
+    r = await api.pickBackground();
+  } catch (e) {
+    toast('打开选择窗口失败: ' + (e && e.message || e), 'err', 3000);
+    return;
+  }
+  if (!r) return; // 用户取消
+  if (!r.ok) { toast(r.error || '这张图片不能用作背景', 'err', 3400); return; }
+  state.settings.background = { ...bgSettings(), file: r.file };
+  applyBackground();
+  syncBgRows();
+  await persist();
+  confirmSound();
+  toast('背景已更新', 'ok', 1500);
+}
+
+async function clearBackground() {
+  state.settings.background = { ...bgSettings(), file: '' };
+  applyBackground();
+  syncBgRows();
+  await persist();
+  try { await api.clearBackground(); } catch { /* 删不掉也只是留个文件 */ }
+  toast('已恢复默认背景', 'ok', 1500);
+}
+
 async function runSettingAction(action) {
+  if (action === 'pickBg') { await pickBackground(); return; }
+  if (action === 'clearBg') { await clearBackground(); return; }
   if (action === 'dataDir') { api.openPath(state.dataDir); return; }
   if (action === 'help') { openHelp(); return; }
   if (action === 'quit') { await persist(); api.quit(); }
@@ -917,6 +1079,7 @@ function openHelp() {
       <div class="section-label" style="margin-top:12px;padding-left:0">管理</div>
       <div class="setting"><div class="setting-text"><div class="setting-name">添加 / 编辑 / 移除</div><div class="setting-desc">选择程序文件即可加入，支持一次多选；右键磁贴可直接编辑</div></div><div class="badge">C · E · Del</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">设置</div><div class="setting-desc">开机自启、全屏、音效、图标尺寸</div></div><div class="badge">S</div></div>
+      <div class="setting"><div class="setting-text"><div class="setting-name">背景图片</div><div class="setting-desc">设置 → 外观：选图、调暗度、开关虚化，也能随时移除</div></div><div class="badge">S</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">关机 / 重启</div><div class="setting-desc">右上角图标按钮，需二次确认</div></div><div class="badge">Ctrl+Alt+P / R</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">全屏切换</div><div class="setting-desc">在沉浸全屏与窗口模式之间切换</div></div><div class="badge">F11</div></div>
     </div>
@@ -1239,7 +1402,10 @@ function pollGamepads() {
   $('#btnSettings').addEventListener('click', () => openSettings());
   $('#btnRestart').addEventListener('click', () => askPower('restart'));
   $('#btnShutdown').addEventListener('click', () => askPower('shutdown'));
-  $$('.hbtn').forEach((b) => b.addEventListener('mouseenter', () => hoverFocus(b)));
+  $$('.hbtn').forEach((b) => {
+    b.addEventListener('mouseenter', () => hoverFocus(b));
+    b.addEventListener('pointerdown', () => Focus.set(b, { noScroll: true }));
+  });
 
   // 首屏焦点
   const first = Focus.firstInGrid();

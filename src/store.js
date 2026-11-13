@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS = {
   hideHints: false,
   hideAfterLaunch: false, // 启动应用后是否收起启动台(默认不收起, 留在应用下层)
   boostLaunch: true,      // 让新窗口铺满屏幕并置顶
+  // 自定义背景: file 为 backgrounds 目录下的文件名, 空表示用默认渐变
+  background: { file: '', dim: 0.45, blur: false },
 };
 
 // 配置文件版本: 用于一次性迁移

@@ -51,13 +51,18 @@
 | 遥控器 / 手柄 | 标准 Gamepad 映射：十字键移动、A 确认、B 返回                              |
 | 开机自启     | 写入 `HKCU\...\Run`，一键开关，失败不破坏开关状态                           |
 | 全屏沉浸     | 默认无边框全屏，`F11` 切换窗口模式                                       |
+| 自定义背景    | 设置 → 外观选一张自己的图片当墙纸，可调暗度、开关虚化；图片存进数据目录，原图挪走也不裂 |
 | 本地持久化    | 应用列表与设置存在 exe 同级的 JSON 文件里，拷走整个文件夹即可迁移                     |
 
 ## 截图
 
-| 主界面 | 设置 | 添加应用 |
-| --- | -- | ---- |
-|     |    |      |
+| 主界面 | 自定义背景 | 设置 |
+| --- | --- | --- |
+| ![主界面](docs/screenshots/main.png) | ![自定义背景](docs/screenshots/background.png) | ![设置](docs/screenshots/settings.png) |
+
+添加应用面板：
+
+![添加应用](docs/screenshots/add.png)
 
 ## 快速开始
 
@@ -100,6 +105,7 @@
 | ---- | --------------------------------------------------------------- |
 | 配置   | `exe 同级\LaunchPlayData\launcher.json`                           |
 | 图标缓存 | `exe 同级\LaunchPlayData\icons\`                                  |
+| 背景图片 | `exe 同级\LaunchPlayData\backgrounds\`（只保留当前使用的一张）               |
 | 回退位置 | `%APPDATA%\LaunchPlay`（exe 所在目录不可写时）                            |
 | 开机自启 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LaunchPlay` |
 

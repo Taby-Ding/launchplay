@@ -40,6 +40,7 @@ html, body {
 body { user-select: none; }
 
 /* ---------------- 背景 ---------------- */
+/* 自下而上: 默认渐变 -> 自定义照片 -> 暗度/暗角 -> 界面 */
 .bg-layer {
   position: fixed;
   inset: 0;
@@ -59,10 +60,38 @@ body { user-select: none; }
   pointer-events: none;
 }
 
+/* 自定义背景照片: 略微放大(inset 负值)以便虚化时不露出边缘 */
+.bg-photo {
+  position: fixed;
+  inset: -3%;
+  z-index: 1;
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity .55s var(--ease), filter .35s var(--ease);
+  pointer-events: none;
+  will-change: opacity, filter;
+}
+.bg-photo.on { opacity: 1; }
+.bg-photo.blur { filter: blur(16px) saturate(1.05); }
+
+/* 暗度 + 暗角: 保证白色文字与图标在任何照片上都读得清 */
+.bg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 92% at 50% 42%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, .62) 100%),
+    rgba(4, 6, 10, var(--bg-dim, .45));
+  transition: background .35s var(--ease);
+}
+
 /* ---------------- 骨架 ---------------- */
 .shell {
   position: relative;
-  z-index: 1;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -817,4 +846,25 @@ html[data-size="large"] {
   line-height: 1.75;
   color: rgba(206, 226, 248, .72);
 }
+
+/* ---------------- 自定义背景下的可读性补偿 ----------------
+   照片的明暗不可控, 磁贴/时钟/按钮都加一层半透明底, 保证文字始终可读 */
+body.has-bg .tile {
+  background: linear-gradient(180deg, rgba(14, 19, 28, .56), rgba(9, 13, 20, .38));
+  border-color: rgba(255, 255, 255, .12);
+}
+body.has-bg .tile.focused {
+  background: linear-gradient(180deg, rgba(124, 199, 255, .30), rgba(14, 22, 34, .46));
+}
+body.has-bg .tile.tile-add {
+  background: linear-gradient(180deg, rgba(14, 19, 28, .34), rgba(9, 13, 20, .2));
+}
+body.has-bg .clock {
+  text-shadow: 0 2px 26px rgba(0, 0, 0, .82), 0 1px 3px rgba(0, 0, 0, .55);
+}
+body.has-bg .date { color: rgba(232, 241, 252, .72); text-shadow: 0 1px 10px rgba(0, 0, 0, .7); }
+body.has-bg .hbtn { background: rgba(8, 12, 18, .42); border-color: rgba(255, 255, 255, .14); }
+body.has-bg .hintbar { border-top-color: rgba(255, 255, 255, .14); color: rgba(226, 236, 248, .58); text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }
+body.has-bg kbd { background: rgba(8, 12, 18, .5); border-color: rgba(255, 255, 255, .16); color: rgba(240, 246, 255, .85); }
+
 

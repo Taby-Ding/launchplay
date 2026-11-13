@@ -10,9 +10,11 @@ contextBridge.exposeInMainWorld('api', {
   getState: () => ipcRenderer.invoke('state:get'),
   saveState: (patch) => ipcRenderer.invoke('state:save', patch),
 
-  // 图标
+  // 图标 / 背景
   ensureIcons: (list) => ipcRenderer.invoke('icons:ensure', list),
   importIcon: (p) => ipcRenderer.invoke('icon:import', p),
+  pickBackground: () => ipcRenderer.invoke('bg:pick'),
+  clearBackground: () => ipcRenderer.invoke('bg:clear'),
 
   // 对话框
   pickExe: () => ipcRenderer.invoke('dialog:pick-exe'),
