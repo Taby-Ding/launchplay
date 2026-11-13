@@ -24,16 +24,10 @@ jobs:
         include:
           - name: windows-x64
             os: windows-latest
-            script: npm run dist:win
             artifact: LaunchPlay-windows-x64
-            files: release/*.exe
           - name: linux-x64
             os: ubuntu-latest
-            script: npm run dist:linux
             artifact: LaunchPlay-linux-x64
-            files: |
-              release/*.AppImage
-              release/*.tar.gz
 
     steps:
       - name: Checkout
@@ -51,24 +45,69 @@ jobs:
       - name: Generate icon
         run: npm run icon
 
-      - name: Build
-        run: ${{ matrix.script }}
+      # ubuntu-latest 升到 24.04 后默认没有 libfuse2，而 appimagetool 本身
+      # 就是个 AppImage，缺了它会在生成阶段直接失败（本地 Windows 打 AppImage
+      # 是缺符号链接权限，CI 上是缺 FUSE，两个不同的坑）。
+      - name: Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        run: npm run dist:win
         env:
           # 本项目不做代码签名，别让 electron-builder 自动去翻系统证书
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # tar.gz 是稳定产物，先单独构建；AppImage 万一失败也不能拖累它
+      - name: Build Linux (tar.gz)
+        if: runner.os == 'Linux'
+        run: npx electron-builder --linux tar.gz --x64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build Linux (AppImage)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: npx electron-builder --linux AppImage --x64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # 不挂载 FUSE，直接解包运行 appimagetool，再兜一层
+          APPIMAGE_EXTRACT_AND_RUN: 1
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.files }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.tar.gz
           retention-days: 14
           if-no-files-found: error
 
+  # 统一发布：两个构建 job 并发写同一个 Release 容易互相覆盖，
+  # 改成等它们都结束后，把所有 artifact 汇总到一处一次性挂上去。
+  # 即使某个 job 失败，也已经产出的文件仍然会发布，不会全军覆没。
+  release:
+    name: Publish Release
+    needs: build
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: LaunchPlay-*
+          path: dist
+          merge-multiple: true
+
+      - name: List files to publish
+        run: ls -lh dist
+
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.files }}
+          files: dist/*
           generate_release_notes: true
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
