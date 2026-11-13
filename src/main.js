@@ -198,7 +198,6 @@ function appIconPath() {
   const candidates = [
     path.join(__dirname, 'assets', 'icon.png'),
     path.join(__dirname, '..', 'build', 'icon.png'), // 开发模式兜底
-    path.join(__dirname, 'assets', 'icon.ico'),
   ];
   for (const p of candidates) {
     try { if (fs.existsSync(p)) return p; } catch { /* 路径不可读就试下一个 */ }

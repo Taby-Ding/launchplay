@@ -183,7 +183,8 @@ const png = encodePNG(256, 256, downsample(256));
 const assetsDir = path.join(__dirname, '..', 'src', 'assets');
 fs.mkdirSync(assetsDir, { recursive: true });
 fs.writeFileSync(path.join(assetsDir, 'icon.png'), png);
-fs.writeFileSync(path.join(assetsDir, 'icon.ico'), ico);
+// 这里刻意不再输出 src/assets/icon.ico：窗口图标只用 PNG，多放一份 ICO 只会
+// 让人以为"ICO 也能当窗口图标"，再踩一次任务栏空白的坑。
 
 console.log('icon.ico', (ico.length / 1024).toFixed(1) + 'KB', 'sizes:', sizes.join(','));
 console.log('icon.png', (png512.length / 1024).toFixed(1) + 'KB  (512x512, mac/linux 打包用)');

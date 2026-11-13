@@ -2,7 +2,7 @@
   "name": "launchplay",
   "productName": "LaunchPlay",
   "version": "1.0.0",
-  "description": "影音快启 (LaunchPlay) —— 把电脑变成电视式全屏大屏启动器，Windows / macOS / Linux 通用",
+  "description": "影音快启 (LaunchPlay) —— 把电脑变成电视式全屏大屏启动器，Windows / Linux 通用",
   "main": "src/main.js",
   "author": "Taby-Ding",
   "license": "MIT",
@@ -53,7 +53,6 @@
     },
     "files": [
       "src/**/*",
-      "assets/**/*",
       "package.json",
       "!**/*.map",
       "!**/node_modules/**/{test,__tests__,tests,example,examples,docs,doc}/**"

@@ -61,7 +61,7 @@ jobs:
         run: ${{ matrix.script }}
         env:
           # 没有 Apple 证书时不要让 electron-builder 去自动查找签名身份，
-          # ad-hoc 签名交给 tools/after-sign.js 在 afterSign 阶段完成
+          # ad-hoc 签名交给 tools/after-pack.js 在 afterPack 阶段完成
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact

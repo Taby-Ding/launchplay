@@ -10,7 +10,7 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-4aa8ff.svg)
 
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4aa8ff.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-4aa8ff.svg)
 
 ![Portable](https://img.shields.io/badge/dist-single%20file-success.svg)
 
@@ -27,25 +27,16 @@
 | 平台 | 架构 | 文件 | 大小 | 说明 |
 | --- | --- | --- | --- | --- |
 | **Windows 10/11** | x64 | [LaunchPlay-1.0.0-windows-x64.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64.exe) | ~71 MB | 单文件免安装，双击即用，无需 .NET / 运行库 |
-| **macOS** | Intel (x64) | [LaunchPlay-1.0.0-mac-x64.zip](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-mac-x64.zip) | ~110 MB | 解压得到 `LaunchPlay.app`，拖进「应用程序」 |
-| **macOS** | Apple Silicon (arm64) | [LaunchPlay-1.0.0-mac-arm64.zip](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-mac-arm64.zip) | ~105 MB | M1/M2/M3/M4 用这个 |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.AppImage](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.AppImage) | ~110 MB | 通用单文件，`chmod +x` 后直接运行 |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.tar.gz](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.tar.gz) | ~111 MB | 解压即用的绿色目录，AppImage 跑不起来时用它 |
 
-> 全部产物都在 [Releases](https://github.com/Taby-Ding/launchplay/releases/tag/v1.0.0) 页面，同一个版本号对应三个平台。
-> macOS 包与 Linux AppImage 由 CI 在对应系统的 runner 上构建（原因见[构建说明](#构建说明)），Windows 包与 Linux tar.gz 也已在本地验证过可运行。
+> 全部产物都在 [Releases](https://github.com/Taby-Ding/launchplay/releases/tag/v1.0.0) 页面。
+>
+> Linux AppImage 由 CI 在 Ubuntu runner 上构建（原因见[构建说明](#构建说明)）；Windows 包与 Linux tar.gz 已在本地验证过可运行。
 
 ### 各平台首次运行
 
 **Windows**：双击 exe 即可。免安装版是自解压包，部分杀软会对这类单文件包误报，可加入信任或自行构建。
-
-**macOS**：包未做代码签名（Apple 开发者账号是付费的），首次打开请**右键 → 打开**，或在终端执行一次：
-
-```bash
-xattr -dr com.apple.quarantine /Applications/LaunchPlay.app
-```
-
-Intel 机器装 x64 包，Apple Silicon 装 arm64 包。装错了也能跑，只是会走 Rosetta 转译。
 
 **Linux**：
 
@@ -76,32 +67,32 @@ cd LaunchPlay-1.0.0-linux-x64
 - **像遥控器**：方向键 / 手柄十字键 / 键盘，全都能操作
 - **像首页**：打开应用后启动台留在下层，关掉应用自动回到这一屏
 
-> 适用于 HTPC、客厅电脑、投影、一体机、旧笔记本改电视盒子、Mac mini 接电视等场景。
+> 适用于 HTPC、客厅电脑、投影、一体机、旧笔记本改电视盒子等场景。
 
-## 三平台能力对照
+## 平台能力对照
 
-同一份界面，三个系统能给的能力不一样，差别都在系统接口上：
+同一份界面，两个系统能给的能力不一样，差别都在系统接口上：
 
-| 能力 | Windows | macOS | Linux |
-| --- | :---: | :---: | :---: |
-| 全屏磁贴启动台 | ✅ | ✅ | ✅ |
-| 图标自动提取 | ✅ exe/dll 的 PE 资源，原生 256px | ✅ `.app` 包内 `.icns`，取最大一张 | ✅ `.desktop` + 图标主题，png/svg |
-| 新窗口铺满并置顶 | ✅ Win32 `SetWindowPos` | — 无对应接口 | — 无对应接口 |
-| 开机自启 | ✅ 注册表 `HKCU\...\Run` | ✅ `LaunchAgents` plist | ✅ XDG autostart |
-| 关机 / 重启 | ✅ `shutdown.exe` | ✅ AppleScript（首次需授权） | ✅ `systemctl` |
-| 提权启动 | ✅ UAC `RunAs` | — | — |
-| UWP 应用 | ✅ | — | — |
-| 遥控器 / 手柄 | ✅ | ✅ | ✅ |
-| 全局唤回热键 | ✅ | ✅ | ✅ |
+| 能力 | Windows | Linux |
+| --- | :---: | :---: |
+| 全屏磁贴启动台 | ✅ | ✅ |
+| 图标自动提取 | ✅ exe/dll 的 PE 资源，原生 256px | ✅ `.desktop` + 图标主题，png/svg |
+| 新窗口铺满并置顶 | ✅ Win32 `SetWindowPos` | — 无对应接口 |
+| 开机自启 | ✅ 注册表 `HKCU\...\Run` | ✅ XDG autostart |
+| 关机 / 重启 | ✅ `shutdown.exe` | ✅ `systemctl` |
+| 提权启动 | ✅ UAC `RunAs` | — |
+| UWP 应用 | ✅ | — |
+| 遥控器 / 手柄 | ✅ | ✅ |
+| 全局唤回热键 | ✅ | ✅ |
 
-> macOS / Linux 上"新窗口铺满并置顶"在设置里会显示为「仅 Windows 支持」并且不可点——不是藏起来，而是确实没有等价的系统接口（macOS 要辅助功能授权、Linux 依窗口管理器而定，做一半反而更让人困惑）。
+> Linux 上"新窗口铺满并置顶"在设置里会显示为「仅 Windows 支持」并且不可点——不是藏起来，而是确实没有等价的可移植接口（要按窗口管理器逐个适配，做一半反而更让人困惑）。
 
 ## 功能
 
 | 能力 | 说明 |
 | --- | --- |
 | 手动添加应用 | 选程序文件，支持**一次多选**，自动读取名称与图标 |
-| 高清图标 | Windows 直接从 PE 资源取 256×256 原图；macOS 从 `.icns` 取最大一张；取不到时退化为渐变字母磁贴 |
+| 高清图标 | Windows 直接从 PE 资源取 256×256 原图；Linux 从 `.desktop` 与图标主题取 512→png/svg；取不到时退化为渐变字母磁贴 |
 | 编辑 / 移除 | 按 `E` 或右键即可改名、改路径、换图标、移除（只从启动台移除，**不卸载**） |
 | 拖动排序 | 按住磁贴拖到想要的位置，松手即保存顺序（拖动超过 8px 才生效，不影响单击启动） |
 | 关机 / 重启 | 右上角图标按钮，二次确认后执行 |
@@ -110,7 +101,7 @@ cd LaunchPlay-1.0.0-linux-x64
 | 新窗口铺满置顶 | 启动后自动把目标窗口铺满当前显示器并置顶（仅 Windows，可在设置里关闭） |
 | 一键唤回 | 全局热键 `Ctrl+Alt+L`，随时把启动台拉回前台 |
 | 遥控器 / 手柄 | 标准 Gamepad 映射：十字键移动、A 确认、B 返回 |
-| 开机自启 | 三平台都是用户级自启，不需要管理员 / root，一键开关，失败不破坏开关状态 |
+| 开机自启 | 两个平台都是用户级自启，不需要管理员 / root，一键开关，失败不破坏开关状态 |
 | 全屏沉浸 | 默认无边框全屏，`F11` 切换窗口模式 |
 | 默认背景 | 自带一张柔和的电视渐变壁纸，开箱就有客厅感；也可换成自己的图片 |
 | 自定义背景 | 设置 → 外观选一张自己的图片当墙纸，可调暗度、开关虚化；图片存进数据目录，原图挪走也不裂 |
@@ -132,7 +123,6 @@ cd LaunchPlay-1.0.0-linux-x64
 2. 运行。首次启动会自动打开「添加应用」。
 3. 点「浏览…」选一个程序（可多选），回车确认。
    - Windows：选 `.exe`，或桌面/开始菜单里的 `.lnk`（会自动解析出真实路径）
-   - macOS：选 `/Applications` 里的 `.app`
    - Linux：选 `/usr/share/applications` 里的 `.desktop`，或可执行文件、AppImage
 4. 之后按 `C` 随时添加，`S` 打开设置。
 
@@ -162,20 +152,19 @@ cd LaunchPlay-1.0.0-linux-x64
 | 全屏切换 | `F11` | — |
 | 关机 / 重启 | `Ctrl+Alt+P` / `Ctrl+Alt+R` | 右上角按钮 |
 
-鼠标：单击启动，右键编辑。macOS 上 `Ctrl` 与 `Command` 都可以。
+鼠标：单击启动，右键编辑。
 
 ## 数据与自启
 
-| 项目 | Windows | macOS | Linux |
-| --- | --- | --- | --- |
-| 配置 | `exe 同级\LaunchPlayData\launcher.json` | `~/Library/Application Support/LaunchPlay/launcher.json` | AppImage 同级 `LaunchPlayData/`，或 `~/.config/LaunchPlay/` |
-| 图标缓存 | `LaunchPlayData\icons\` | 同上目录 `icons/` | 同上目录 `icons/` |
-| 背景图片 | `LaunchPlayData\backgrounds\`（只留当前一张） | 同上目录 `backgrounds/` | 同上目录 `backgrounds/` |
-| 回退位置 | `%APPDATA%\LaunchPlay` | — （默认就在用户目录） | `~/.config/LaunchPlay` |
-| 开机自启 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LaunchPlay` | `~/Library/LaunchAgents/com.launchplay.desktop.plist` | `~/.config/autostart/launchplay.desktop` |
+| 项目 | Windows | Linux |
+| --- | --- | --- |
+| 配置 | `exe 同级\LaunchPlayData\launcher.json` | AppImage 同级 `LaunchPlayData/`，或 `~/.config/LaunchPlay/` |
+| 图标缓存 | `LaunchPlayData\icons\` | 同上目录 `icons/` |
+| 背景图片 | `LaunchPlayData\backgrounds\`（只留当前一张） | 同上目录 `backgrounds/` |
+| 回退位置 | `%APPDATA%\LaunchPlay` | `~/.config/LaunchPlay` |
+| 开机自启 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LaunchPlay` | `~/.config/autostart/launchplay.desktop` |
 
 - Windows 上 exe 放在 `C:\Program Files` 下时，系统会阻止写同级目录，数据会自动落到 `%APPDATA%\LaunchPlay`。
-- macOS 的 `.app` 内部是只读的签名范围，数据一律走用户目录，不往包里写。
 - Linux 上从 AppImage 启动时，数据写在 **AppImage 文件旁边**；如果那个位置不可写（例如放在 `/opt`），自动退到 `~/.config/LaunchPlay`。
 
 ## 系统要求
@@ -183,7 +172,6 @@ cd LaunchPlay-1.0.0-linux-x64
 | 平台 | 要求 |
 | --- | --- |
 | Windows | Windows 10 1809 及以上 / Windows 11，x64；无需 .NET、无需 VC++ 运行库、无需管理员权限 |
-| macOS | macOS 11 (Big Sur) 及以上；Intel 或 Apple Silicon |
 | Linux | x64 桌面发行版，需要图形环境（X11 或 Wayland）；推荐 glibc 2.28+ |
 
 建议 1920×1080 及以上分辨率（为 16:9 大屏设计）。
@@ -194,7 +182,7 @@ cd LaunchPlay-1.0.0-linux-x64
 git clone https://github.com/Taby-Ding/launchplay.git
 cd launchplay
 npm install
-npm start              # 开发运行（三平台通用）
+npm start              # 开发运行（Windows / Linux 通用）
 ```
 
 按平台打包：
@@ -202,8 +190,6 @@ npm start              # 开发运行（三平台通用）
 ```bash
 npm run dist:win       # Windows 便携 exe        -> release/LaunchPlay-<ver>-windows-x64.exe
 npm run dist:linux     # AppImage + tar.gz       -> release/LaunchPlay-<ver>-linux-x64.*
-npm run dist:mac       # x64 + arm64 zip         -> release/LaunchPlay-<ver>-mac-<arch>.zip
-npm run dist:all       # 三个平台全打（需对应系统，见下）
 ```
 
 其他脚本：
@@ -215,8 +201,7 @@ npm run prepare-electron  # 只生成精简版 Electron 运行时（Windows 打�
 
 ### 构建说明
 
-- **跨平台打包的现实**（三个都能踩到的坑）：
-  - **macOS 包只能在 macOS 上打**。electron-builder 会直接拒绝：`Build for macOS is supported only on macOS`。`.app` 内的框架软链、`codesign`、`hdiutil` 都依赖系统自带工具，没有交叉编译这条路。
+- **跨平台打包的现实**（两个都踩过的坑）：
   - **Linux AppImage 需要创建文件软链**。Windows 上普通用户默认没有 `SeCreateSymbolicLinkPrivilege`（除非打开「开发者模式」），app-builder 在写图标时会报 `A required privilege is not held by the client`。在 Linux 上或 CI 里没有这个问题。
   - **在 Windows 上打 Linux tar.gz 会丢执行权限**。NTFS 没有 Unix 权限位，打出来的包全是 0644，Linux 用户解压后 `./launchplay` 直接 Permission denied。所以仓库带了 `tools/pack-linux-tar.js`，按 ustar 格式重写归档，把 `launchplay` / `chrome-sandbox` / `chrome_crashpad_handler` 记成 0755：
     ```bash
@@ -228,28 +213,26 @@ npm run prepare-electron  # 只生成精简版 Electron 运行时（Windows 打�
   export ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/
   ```
 - 图标只有一个源：`build/icon.png`（512×512，由 `npm run icon` 现场画出来）。Windows 另用 `build/icon.ico`，运行时窗口图标用打进 asar 的 `src/assets/icon.png`。
-- macOS 没有证书时，`tools/after-sign.js`（electron-builder 的 `afterSign` 钩子）会给 `.app` 打一次 ad-hoc 签名，否则 Apple Silicon 会拒绝启动。
 
 ## 项目结构
 
 ```
 src/
   main.js            主进程：窗口、IPC、协议、生命周期
-  platform.js        平台能力表（三平台的差异集中在这里）
+  platform.js        平台能力表（两个平台的差异集中在这里）
   preload.js         contextBridge 安全桥（contextIsolation + sandbox）
   store.js           JSON 持久化（临时文件 + rename 原子写）
 
   # 启动 / 自启 / 电源：按平台分派
-  launch.js          启动条目：Windows spawn+UAC / macOS open -a / Linux .desktop+AppImage
-  autostart.js       开机自启：注册表 / LaunchAgents plist / XDG autostart
-  power.js           关机重启：shutdown.exe / AppleScript / systemctl
+  launch.js          启动条目：Windows spawn+UAC / Linux .desktop+AppImage
+  autostart.js       开机自启：Windows 注册表 / Linux XDG autostart
+  power.js           关机重启：Windows shutdown.exe / Linux systemctl
 
   # 快捷方式与图标：按平台分派
-  pick.js            选择结果标准化（.lnk / .app / .desktop 统一成一个模型）
+  pick.js            选择结果标准化（.lnk / .desktop 统一成一个模型）
   shortcut.js        Windows：原生 Shell Link 解析，1.4ms 拿到真实目标
   lnk.js             Windows：.lnk 解析 + PowerShell 兜底
   peicon.js          Windows：PE 资源图标解析 + PNG 编码（纯 JS，零依赖）
-  macicon.js         macOS：Info.plist + .icns -> PNG
   desktop-entry.js   Linux：.desktop 解析 + 图标主题查找（<root>/<主题>/<尺寸>/apps/）
   iconcache.js       图标提取与磁盘缓存（png / svg 分别处理）
   winboost.js        Windows：常驻 PowerShell 辅助进程，新窗口铺满 + 置顶
@@ -262,18 +245,17 @@ tools/
 
 ### 几个实现要点
 
-- **图标提取**：三个平台三条路。Windows 自己写了 PE 资源解析器（`peicon.js`），遍历 `.rsrc` 的图标目录条目（而不是按数字 ID 找，很多程序的图标是命名资源），优先取 PNG 压缩条目，否则解码 DIB 再重新编码；macOS 读 `Info.plist` 的 `CFBundleIconFile` 再解 `.icns` 容器（`ic07`~`ic14` 本身就是 PNG，挑最大的一张）；Linux 解析 `.desktop` 的 `Icon=`，按 freedesktop 规范到图标主题目录里从 512 逐级往下找。全程零原生依赖。
+- **图标提取**：两个平台两条路。Windows 自己写了 PE 资源解析器（`peicon.js`），遍历 `.rsrc` 的图标目录条目（而不是按数字 ID 找，很多程序的图标是命名资源），优先取 PNG 压缩条目，否则解码 DIB 再重新编码；Linux 解析 `.desktop` 的 `Icon=`，按 freedesktop 规范到图标主题目录里从 512 逐级往下找。全程零原生依赖。
 - **Windows 窗口增强**：需要 `SetWindowPos`，但 Node 没有原生绑定。这里用一个**常驻的 PowerShell 辅助进程**：预热一次，把 C# 代码编译成 DLL 缓存，之后走行协议通信，避免每次冷启动 3.5 秒的开销；连续 10 分钟不用会自动退出，省内存。
 - **快捷方式图标**：`.lnk` 直接向 Shell 要图标，拿到的是"空白页 + 快捷方式箭头"的通用图标（40×40，还刚好卡在尺寸阈值上不被过滤掉）。这里改成自己解析 Shell Link 格式，读出真实目标与 `IconLocation`，再从目标 exe 的 PE 资源里取 256px 原图；顺带把解析耗时从外部脚本的 2.4s 降到 1.4ms。
 - **焦点导航**：不做网格下标计算，而是在所有磁贴里按方向做空间搜索（比较中心点偏移与垂直距离），所以不等宽的磁贴、最后一行不满时也能走对。
 
 ## 已知限制
 
-- **Windows 没有公开接口把别的程序变成真全屏**（独占全屏），本项目只能做到"铺满 + 隐藏任务栏"，视觉上等价；macOS / Linux 连这一步都没有，设置里会标注为不支持。
+- **Windows 没有公开接口把别的程序变成真全屏**（独占全屏），本项目只能做到"铺满 + 隐藏任务栏"，视觉上等价；Linux 连这一步都没有，设置里会标注为不支持。
 - `.lnk` 快捷方式和协议链接拿不到子进程 PID，因此"新窗口铺满置顶"对它们不生效。
 - 启动台在前台时，`Esc` 会发给前台应用；回到首页请用 `Ctrl+Alt+L` 或 `Alt+Tab`。
 - 部分程序（UWP 应用、二级启动器）启动后会拉起另一个进程，窗口增强可能不生效。
-- macOS 包没有代码签名与公证，首次打开需要右键→打开（或清一次 quarantine 属性）；Apple Silicon 上如果系统拒绝启动，可以先本地自签一次：`codesign --force --deep --sign - /Applications/LaunchPlay.app`。
 - Linux 上如果某个应用**只提供 SVG 图标**，会正常显示（浏览器直接渲染）；但如果图标藏在 Flatpak/Snap 的私有目录又不在标准主题路径里，可能拿不到，会退化成字母磁贴。
 - Linux 的"关机 / 重启"依赖 systemd + polkit；非 systemd 发行版（如部分轻量发行版）会失败并提示。
 
@@ -288,9 +270,6 @@ Windows 上需要管理员权限的程序会触发 UAC 提示；路径失效时�
 **杀毒软件报毒？**  
 Windows 免安装版是自解压 exe，部分杀软会对这类单文件包误报。可以加入信任，或用 `npm run dist:win` 自行构建。
 
-**macOS 提示"已损坏，无法打开"？**  
-未签名的正常现象，执行 `xattr -dr com.apple.quarantine /Applications/LaunchPlay.app` 即可。
-
 **重启后列表丢了？**  
 检查数据目录是否可写。Windows 上 exe 在 `C:\Program Files` 下会把数据存到 `%APPDATA%\LaunchPlay`；Linux 上 AppImage 放在只读位置时会存到 `~/.config/LaunchPlay`。
 
@@ -298,7 +277,7 @@ Windows 免安装版是自解压 exe，部分杀软会对这类单文件包误�
 
 欢迎 Issue 和 PR。提交前请先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-本项目没有构建步骤、没有前端框架、没有运行时依赖，改完 `src/renderer/` 直接 `npm start` 就能看到效果。三平台的差异请统一收进 `src/platform.js`，不要在业务代码里散落 `process.platform` 判断。
+本项目没有构建步骤、没有前端框架、没有运行时依赖，改完 `src/renderer/` 直接 `npm start` 就能看到效果。各平台的差异请统一收进 `src/platform.js`，不要在业务代码里散落 `process.platform` 判断。
 
 ## License
 
