@@ -1,8 +1,8 @@
 {
   "name": "launchplay",
   "productName": "LaunchPlay",
-  "version": "2.2.1",
-  "description": "影音快启 (LaunchPlay) —— 把 Windows 电脑变成电视式全屏大屏启动器，遥控器 / 键盘 / 鼠标都能操作",
+  "version": "1.0.0",
+  "description": "影音快启 (LaunchPlay) —— 把电脑变成电视式全屏大屏启动器，Windows / macOS / Linux 通用",
   "main": "src/main.js",
   "author": "Taby-Ding",
   "license": "MIT",
@@ -21,6 +21,8 @@
     "htpc",
     "tv",
     "windows",
+    "macos",
+    "linux",
     "kiosk",
     "remote-control",
     "media-center"
@@ -29,8 +31,11 @@
     "start": "electron .",
     "icon": "node tools/make-icon.js",
     "prepare-electron": "node tools/prepare-electron.js",
-    "predist": "node tools/prepare-electron.js",
-    "dist": "electron-builder --win portable --x64"
+    "dist": "npm run dist:win",
+    "dist:win": "node tools/prepare-electron.js && electron-builder --win portable --x64 --config.electronDist=build/electron-dist",
+    "dist:linux": "electron-builder --linux AppImage tar.gz --x64",
+    "dist:mac": "electron-builder --mac zip --x64 --arm64",
+    "dist:all": "npm run dist:win && npm run dist:linux && npm run dist:mac"
   },
   "devDependencies": {
     "electron": "38.2.2",
@@ -41,7 +46,7 @@
     "productName": "LaunchPlay",
     "asar": true,
     "compression": "maximum",
-    "electronDist": "build/electron-dist",
+    "afterPack": "tools/after-pack.js",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -63,12 +68,60 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "LaunchPlay-${version}-portable.exe",
+      "artifactName": "LaunchPlay-${version}-windows-x64.${ext}",
       "requestedExecutionLevel": "asInvoker"
     },
     "portable": {
-      "artifactName": "LaunchPlay-${version}-portable.exe",
+      "artifactName": "LaunchPlay-${version}-windows-x64.${ext}",
       "unpackDirName": "LaunchPlay"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.entertainment",
+      "darkModeSupport": true,
+      "artifactName": "LaunchPlay-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "LSMinimumSystemVersion": "11.0",
+        "NSHighResolutionCapable": true
+      }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "executableName": "launchplay",
+      "synopsis": "把电脑变成电视式大屏启动器",
+      "description": "全屏磁贴启动台，方向键 / 遥控器 / 鼠标都能操作",
+      "artifactName": "LaunchPlay-${version}-linux-x64.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "LaunchPlay",
+          "Comment": "电视式全屏大屏启动器",
+          "Categories": "AudioVideo;Player;Utility;"
+        }
+      }
     }
   }
 }

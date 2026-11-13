@@ -13,7 +13,33 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    # 三平台各自在原生 runner 上构建，这不是偷懒，是硬约束：
+    #   - Windows 包只能在 Windows 上打（NSIS / signtool）
+    #   - Linux AppImage 需要创建文件软链，Windows 普通用户没有该权限
+    #   - macOS 包只能在 macOS 上打，electron-builder 会直接拒绝跨平台
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            script: npm run dist:win
+            artifact: LaunchPlay-windows-x64
+            files: release/*.exe
+          - name: linux-x64
+            os: ubuntu-latest
+            script: npm run dist:linux
+            artifact: LaunchPlay-linux-x64
+            files: |
+              release/*.AppImage
+              release/*.tar.gz
+          - name: macos-x64-arm64
+            os: macos-latest
+            script: npm run dist:mac
+            artifact: LaunchPlay-macos
+            files: release/*.zip
 
     steps:
       - name: Checkout
@@ -31,19 +57,25 @@ jobs:
       - name: Generate icon
         run: npm run icon
 
-      - name: Build portable exe
-        run: npm run dist
+      - name: Build
+        run: ${{ matrix.script }}
+        env:
+          # 没有 Apple 证书时不要让 electron-builder 去自动查找签名身份，
+          # ad-hoc 签名交给 tools/after-sign.js 在 afterSign 阶段完成
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LaunchPlay-windows-x64
-          path: release/*.exe
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
           retention-days: 14
+          if-no-files-found: error
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: ${{ matrix.files }}
           generate_release_notes: true
+          fail_on_unmatched_files: false

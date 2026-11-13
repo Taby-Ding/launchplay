@@ -5,16 +5,19 @@
  */
 
 const {
-  app, BrowserWindow, ipcMain, protocol, dialog, shell, Menu, nativeImage, globalShortcut,
+  app, BrowserWindow, ipcMain, protocol, dialog, shell, Menu, globalShortcut,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
 
 const { Store } = require('./store');
 const { IconCache } = require('./iconcache');
-const { normalizePick } = require('./lnk');
-const { boostWindow, warmup: warmBoost, shutdownWorker: stopBoost } = require('./winboost');
+const { normalizePick } = require('./pick');
+const { boostWindow, warmup: warmBoost, shutdownWorker: stopBoost, SUPPORTED: BOOST_SUPPORTED } = require('./winboost');
+const { WIN, MAC, LINUX, caps, text: PTEXT } = require('./platform');
+const autostart = require('./autostart');
+const { power } = require('./power');
+const { launchItem } = require('./launch');
 
 const isDev = !app.isPackaged;
 const CAPTURE = process.env.TL_CAPTURE || '';
@@ -60,12 +63,31 @@ function migrateLegacyData(portableDir) {
   }
 }
 
+/**
+ * 便携目录: 优先把数据放在程序旁边, 真正做到「拷走就能用」。
+ *   Windows: 便携版 exe 会给出 PORTABLE_EXECUTABLE_DIR
+ *   Linux:   AppImage 用 $APPIMAGE 所在目录; 解压版用二进制所在目录
+ *   macOS:   .app 是个包, 往里写数据会破坏签名, 所以直接走 userData
+ */
+function portableDataDir() {
+  if (WIN) {
+    const d = process.env.PORTABLE_EXECUTABLE_DIR;
+    return d ? path.join(d, 'LaunchPlayData') : '';
+  }
+  if (LINUX) {
+    if (process.env.APPIMAGE) return path.join(path.dirname(process.env.APPIMAGE), 'LaunchPlayData');
+    try { return path.join(path.dirname(app.getPath('exe')), 'LaunchPlayData'); } catch { return ''; }
+  }
+  return '';
+}
+
 function resolveDataDir() {
   const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
   const candidates = [];
   if (portableDir) migrateLegacyData(portableDir);
   if (process.env.TL_DATA_DIR) candidates.push(process.env.TL_DATA_DIR);
-  if (portableDir) candidates.push(path.join(portableDir, 'LaunchPlayData'));
+  const portable = portableDataDir();
+  if (portable) candidates.push(portable);
   candidates.push(app.getPath('userData'));
   for (const c of candidates) {
     try {
@@ -107,6 +129,7 @@ const MIME_BY_EXT = {
   '.gif': 'image/gif',
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
 };
 
 /**
@@ -210,7 +233,13 @@ function createWindow() {
     },
   });
 
-  Menu.setApplicationMenu(null);
+  // macOS 上完全去掉菜单会连带失去 Cmd+C / Cmd+V / Cmd+A 这些文本编辑快捷键,
+  // 添加应用的输入框就没法用了, 所以只在 Windows / Linux 上清空菜单。
+  if (MAC) {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]));
+  } else {
+    Menu.setApplicationMenu(null);
+  }
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // 渲染进程日志转发到终端, 方便排查
@@ -286,133 +315,36 @@ function createWindow() {
 }
 
 /* ------------------------- 开机自启 ------------------------- */
-const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
-const RUN_VALUE = 'LaunchPlay';
+/**
+ * 三平台实现都在 autostart.js 里:
+ *   Windows -> HKCU\...\Run 注册表项
+ *   macOS   -> ~/Library/LaunchAgents/com.launchplay.desktop.plist
+ *   Linux   -> ~/.config/autostart/launchplay.desktop
+ * 都不需要管理员权限。
+ */
+const getAutostart = () => autostart.getAutostart();
+const setAutostart = (enabled) => autostart.setAutostart(enabled);
 
-function autostartTarget() {
-  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-}
-
-function regExe(args, timeout = 8000) {
-  return new Promise((resolve) => {
-    try {
-      execFile('reg.exe', args, { windowsHide: true, timeout }, (err, stdout, stderr) => {
-        resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || '') });
-      });
-    } catch (e) {
-      resolve({ ok: false, stdout: '', stderr: String(e && e.message || e) });
-    }
-  });
-}
-
-async function getAutostart() {
-  const r = await regExe(['query', RUN_KEY, '/v', RUN_VALUE]);
-  if (!r.ok) return { enabled: false, command: '' };
-  const m = r.stdout.match(new RegExp(`${RUN_VALUE}\\s+REG_SZ\\s+(.+)`, 'i'));
-  return { enabled: !!m, command: m ? m[1].trim() : '' };
-}
-
-async function setAutostart(enabled) {
-  if (enabled) {
-    const cmd = `"${autostartTarget()}"`;
-    const r = await regExe(['add', RUN_KEY, '/v', RUN_VALUE, '/t', 'REG_SZ', '/d', cmd, '/f']);
-    return r.ok;
+/** 把当前运行位置告诉自启模块(mac 需要 .app 包路径, 其余需要可执行文件路径) */
+function setupAutostartContext() {
+  const exePath = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
+  let appPath = '';
+  if (MAC) {
+    // .../LaunchPlay.app/Contents/MacOS/LaunchPlay -> .../LaunchPlay.app
+    const guess = path.resolve(exePath, '..', '..', '..');
+    if (/\.app$/i.test(guess)) appPath = guess;
   }
-  // 不存在时删除会报错, 忽略即可
-  await regExe(['delete', RUN_KEY, '/v', RUN_VALUE, '/f']);
-  return true;
+  autostart.init({
+    exePath: LINUX && process.env.APPIMAGE ? process.env.APPIMAGE : exePath,
+    appPath,
+    displayName: '影音快启 LaunchPlay',
+  });
 }
 
 /* ------------------------- 启动应用 ------------------------- */
-/** 简单参数分词, 支持双引号包裹 */
-function splitArgs(str) {
-  const out = [];
-  const re = /"([^"]*)"|(\S+)/g;
-  let m;
-  while ((m = re.exec(str))) out.push(m[1] !== undefined ? m[1] : m[2]);
-  return out;
-}
-
-function spawnDetached(exe, args) {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    let child;
-    try {
-      child = spawn(exe, args, {
-        detached: true,
-        stdio: 'ignore',
-        cwd: path.dirname(exe) || undefined,
-        windowsHide: false,
-      });
-    } catch (e) {
-      return reject(e);
-    }
-    child.once('error', (e) => {
-      if (!done) { done = true; reject(e); }
-    });
-    child.once('spawn', () => {
-      if (!done) { done = true; child.unref(); resolve(child); }
-    });
-  });
-}
-
-/** 需要管理员权限的程序: 走 ShellExecute RunAs, 会弹 UAC */
-function launchElevated(exe, args) {
-  const argLine = args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(',');
-  const ps = [
-    '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
-    `Start-Process -FilePath '${exe.replace(/'/g, "''")}'${argLine ? ` -ArgumentList ${argLine}` : ''} -Verb RunAs`,
-  ];
-  return new Promise((resolve) => {
-    const c = spawn('powershell.exe', ps, { detached: true, stdio: 'ignore', windowsHide: true });
-    c.on('error', () => resolve(false));
-    c.on('spawn', () => { c.unref(); resolve(true); });
-  });
-}
-
-async function launchItem(item) {
-  if (!item) return { ok: false, error: '条目不存在' };
-
-  if (item.kind === 'uwp' && item.appId) {
-    try {
-      await spawnDetached('explorer.exe', [`shell:AppsFolder\\${item.appId}`]);
-      afterLaunch(0);
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: '无法启动该应用: ' + e.message };
-    }
-  }
-
-  const target = (item.target || '').trim();
-  if (!target) return { ok: false, error: '该条目没有可执行路径，请编辑后重试' };
-  if (!fs.existsSync(target)) return { ok: false, error: `路径不存在: ${target}` };
-
-  const ext = path.extname(target).toLowerCase();
-  const args = item.args ? splitArgs(item.args) : [];
-
-  // 快捷方式 / 脚本 / 协议链接交给系统处理
-  if (['.lnk', '.url', '.bat', '.cmd', '.ps1', '.msc'].includes(ext) || target.includes('::')) {
-    const err = await shell.openPath(target);
-    if (!err) afterLaunch(0);
-    return err ? { ok: false, error: err } : { ok: true };
-  }
-
-  try {
-    const child = await spawnDetached(target, args);
-    afterLaunch(child && child.pid);
-    return { ok: true };
-  } catch (e) {
-    if (e && (e.code === 'EACCES' || e.code === 'EPERM')) {
-      const ok = await launchElevated(target, args);
-      if (ok) afterLaunch(0);
-      return ok ? { ok: true } : { ok: false, error: '该程序需要管理员权限，已取消' };
-    }
-    // 兜底: 用 ShellExecute
-    const err = await shell.openPath(target);
-    if (!err) afterLaunch(0);
-    return err ? { ok: false, error: err } : { ok: true };
-  }
-}
+/**
+ * 启动逻辑抽到 launch.js(三平台分派)。这里只负责启动之后的收尾动作。
+ */
 
 /**
  * 启动应用后的收尾动作:
@@ -442,7 +374,7 @@ function afterLaunch(pid) {
     }
   }
 
-  if (s.boostLaunch !== false && pid) {
+  if (BOOST_SUPPORTED && s.boostLaunch !== false && pid) {
     boostWindow(pid, { topmost: true, cover: true, timeout: 8000 })
       .then((r) => { if (process.env.TL_DEBUG_BOOST) console.error('[boost]', pid, JSON.stringify(r)); })
       .catch(() => { /* 尽力而为 */ });
@@ -478,6 +410,10 @@ function stateSnapshot() {
     firstRun: store.firstRun,
     dataDir: DATA_DIR,
     version: app.getVersion(),
+    // 界面据此调整文案与可选项（mac/linux 上没有窗口增强、没有 UAC）
+    platform: process.platform,
+    caps,
+    text: PTEXT,
   };
 }
 
@@ -541,17 +477,30 @@ function setupIpc() {
    * 返回标准化后的条目数组, 由渲染层决定是填表还是批量添加
    */
   ipcMain.handle('dialog:pick-exe', async () => {
+    // 三个平台能选的"快捷方式"差别很大: .lnk / .app / .desktop
+    const filters = WIN
+      ? [
+        { name: '程序与快捷方式', extensions: ['exe', 'lnk', 'bat', 'cmd', 'msc', 'com', 'url'] },
+        { name: '所有文件', extensions: ['*'] },
+      ]
+      : MAC
+        ? [
+          { name: '应用程序', extensions: ['app'] },
+          { name: '所有文件', extensions: ['*'] },
+        ]
+        : [
+          { name: '启动项与程序', extensions: ['desktop', 'AppImage', 'appimage', 'sh', 'bin'] },
+          { name: '所有文件', extensions: ['*'] },
+        ];
+
     const r = await dialog.showOpenDialog(win, {
       title: '选择要添加的程序（可多选）',
       buttonLabel: '添加',
       properties: ['openFile', 'multiSelections', 'dontAddToRecent'],
-      filters: [
-        { name: '程序与快捷方式', extensions: ['exe', 'lnk', 'bat', 'cmd', 'msc', 'com', 'url'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
+      filters,
     });
     if (r.canceled || !r.filePaths.length) return null;
-    const deep = r.filePaths.length === 1; // 只有单个时才解析 .lnk, 批量时保证速度
+    const deep = r.filePaths.length === 1; // 只有单个时才深入解析, 批量时保证速度
     const out = [];
     for (const f of r.filePaths) {
       try {
@@ -573,7 +522,12 @@ function setupIpc() {
     return r.filePaths[0];
   });
 
-  ipcMain.handle('app:launch', async (_e, item) => launchItem(item));
+  // 启动由 launch.js 按平台分派, 收尾动作(让出焦点 / 窗口增强)留在这里
+  ipcMain.handle('app:launch', async (_e, item) => {
+    const r = await launchItem(item);
+    if (r && r.ok) afterLaunch(r.pid || 0);
+    return r;
+  });
 
   // 供渲染层/外部唤起启动台(与全局热键同一入口)
   ipcMain.handle('launcher:toggle', () => {
@@ -587,14 +541,7 @@ function setupIpc() {
     };
   });
 
-  ipcMain.handle('power', async (_e, action) => {
-    const arg = action === 'restart' ? '/r' : '/s';
-    return new Promise((resolve) => {
-      const c = spawn('shutdown.exe', [arg, '/t', '0'], { windowsHide: true, detached: true, stdio: 'ignore' });
-      c.on('error', (err) => resolve({ ok: false, error: err.message }));
-      c.on('spawn', () => { c.unref(); resolve({ ok: true }); });
-    });
-  });
+  ipcMain.handle('power', async (_e, action) => power(action));
 
   ipcMain.handle('autostart:get', () => getAutostart());
   ipcMain.handle('autostart:set', async (_e, enabled) => {
@@ -646,6 +593,7 @@ if (!gotLock) {
 
     registerIconProtocol();
     setupIpc();
+    setupAutostartContext();
     createWindow();
 
     // Ctrl+Alt+L 呼出/收起启动台 —— 应用被置顶时靠它回来
@@ -656,17 +604,20 @@ if (!gotLock) {
     }
 
     // 预热窗口增强用的辅助进程, 让第一次启动应用不用等。
-    // 延后到首屏稳定之后再拉起, 避免启动瞬间和渲染争内存
-    setTimeout(() => {
-      if (store.settings.boostLaunch !== false) warmBoost();
-    }, 5000);
+    // 延后到首屏稳定之后再拉起, 避免启动瞬间和渲染争内存。
+    // 只有 Windows 有这条路径, 其他平台直接跳过(不必白起一个进程)。
+    if (BOOST_SUPPORTED) {
+      setTimeout(() => {
+        if (store.settings.boostLaunch !== false) warmBoost();
+      }, 5000);
+    }
 
-    // 自愈: 让注册表里的自启项与实际设置保持一致
+    // 自愈: 让系统里的自启项与实际设置保持一致
     getAutostart().then((cur) => {
       const want = store.settings.autostart === true;
       if (want !== cur.enabled) return setAutostart(want);
       return null;
-    }).catch(() => { /* 某些安全策略会禁止访问注册表, 忽略 */ });
+    }).catch(() => { /* 某些安全策略会禁止写自启项, 忽略 */ });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

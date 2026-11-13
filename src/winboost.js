@@ -14,6 +14,14 @@
 const path = require('path');
 const { spawn } = require('child_process');
 
+/**
+ * 窗口增强是纯 Win32 能力（SetWindowPos / MonitorFromWindow），macOS 与 Linux
+ * 没有等价的可编程接口：macOS 需要辅助功能授权、Linux 依赖 xdotool/wmctrl 且
+ * 各家窗口管理器行为不一致。所以非 Windows 上这里是空实现 —— 界面会同步把
+ * 这一行标注为"当前系统不支持"，不做半吊子的尝试。
+ */
+const SUPPORTED = process.platform === 'win32';
+
 const CS_SRC = String.raw`
 using System;
 using System.Collections.Generic;
@@ -272,6 +280,7 @@ function startWorker() {
  * @returns {Promise<{ok: boolean, info?: string}>}
  */
 async function boostWindow(pid, opts = {}) {
+  if (!SUPPORTED) return { ok: false, info: 'unsupported platform' };
   if (!pid) return { ok: false, info: 'no pid' };
   const topmost = opts.topmost !== false;
   const cover = opts.cover !== false;
@@ -301,11 +310,13 @@ async function boostWindow(pid, opts = {}) {
 
 /** 预热: 提前把辅助进程和 C# 辅助类准备好 */
 async function warmup() {
+  if (!SUPPORTED) return;
   try { await startWorker(); } catch { /* 失败就退回"不增强" */ }
 }
 
 /** 应用退出前调用, 顺手结束辅助进程 */
 function shutdownWorker() {
+  if (!SUPPORTED) return;
   if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
   if (!worker) return;
   try { worker.stdin.write('QUIT\n'); } catch {}
@@ -315,4 +326,4 @@ function shutdownWorker() {
   ready = false;
 }
 
-module.exports = { boostWindow, warmup, shutdownWorker };
+module.exports = { boostWindow, warmup, shutdownWorker, SUPPORTED };

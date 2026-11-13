@@ -32,6 +32,25 @@ const overlayEl = () => $('#overlay');
 const isOverlayOpen = () => !overlayEl().classList.contains('hidden');
 
 /**
+ * 平台信息（init 时由主进程灌进来）。
+ * 文案与可选项都从这里取，模板里就不用再写三元表达式判断系统。
+ */
+let PLAT = {
+  win: true,
+  mac: false,
+  linux: false,
+  caps: { windowBoost: true, elevate: true, uwp: true },
+  text: {
+    osName: 'Windows',
+    loginHint: '登录 Windows 后自动打开启动台',
+    pickerHint: '点击右侧「浏览…」选择 exe、bat 或快捷方式',
+    pathPlaceholder: 'C:\\Program Files\\App\\app.exe',
+    formatHelp: '支持 exe / lnk / bat / cmd 等格式。',
+    quitHint: '关闭程序，返回 Windows 桌面',
+  },
+};
+
+/**
  * 只有"鼠标真的在动"时才让悬停接管焦点。
  * 否则弹层刚打开时光标恰好压在某个元素上, 会莫名其妙把焦点抢走。
  */
@@ -576,7 +595,7 @@ async function openAdd() {
       <div class="field">
         <label class="field-label">程序路径 / 快捷方式</label>
         <div class="input-row">
-          <input class="input" id="fPath" data-focusable placeholder="点击右侧「浏览…」选择 exe、bat 或快捷方式" />
+          <input class="input" id="fPath" data-focusable placeholder="${esc(PLAT.text.pickerHint)}" />
           <button class="btn btn-primary" id="fBrowse" data-focusable>浏览…</button>
         </div>
       </div>
@@ -597,8 +616,7 @@ async function openAdd() {
       </div>
       <div class="icon-preview-wrap" id="iconPreviewWrap"></div>
       <div class="tip-box">
-        支持 exe / lnk / bat / cmd 等格式。桌面或开始菜单里的快捷方式同样可以直接选择，
-        程序会自动解析出真实路径。需要管理员权限的程序，启动时会弹出 UAC 授权框。
+        ${esc(PLAT.text.formatHelp)}
       </div>
     </div>
     <div class="m-foot">
@@ -711,7 +729,7 @@ function fieldHtml(v = {}, isEdit = false) {
     <div class="field">
       <label class="field-label">程序路径 / 快捷方式</label>
       <div class="input-row">
-        <input class="input" id="fPath" data-focusable value="${esc(v.target || '')}" placeholder="C:\\Program Files\\App\\app.exe" />
+        <input class="input" id="fPath" data-focusable value="${esc(v.target || '')}" placeholder="${esc(PLAT.text.pathPlaceholder)}" />
         <button class="btn" id="fBrowse" data-focusable>浏览…</button>
       </div>
     </div>
@@ -730,12 +748,28 @@ function fieldHtml(v = {}, isEdit = false) {
 }
 
 function renderManualTab(body) {
+  const tips = PLAT.win
+    ? [
+      '支持 exe / lnk / bat / cmd 以及任意协议路径',
+      '选择 .lnk 快捷方式会自动解析出真实程序路径',
+      '需要管理员权限的程序，启动时可能弹出 UAC 授权',
+    ]
+    : PLAT.mac
+      ? [
+        '支持 .app 应用包与任意可执行文件',
+        '选中 .app 会自动读出应用名与包内图标',
+        '未签名的应用首次启动时，需在「系统设置 → 隐私与安全性」里放行',
+      ]
+      : [
+        '支持可执行文件、AppImage 与 .desktop 启动项',
+        '选中 .desktop 会自动解析出真实命令与图标',
+        'AppImage 会自动补上执行权限，不需要手动 chmod',
+      ];
+
   body.innerHTML = `${fieldHtml({})}
     <div class="section-label" style="padding-left:0;margin-top:6px">提示</div>
     <div style="font-size:12px;color:var(--txt-dim);line-height:1.7;padding:0 2px 6px">
-      · 支持 exe / lnk / bat / cmd 以及任意协议路径<br/>
-      · 选择 .lnk 快捷方式会自动解析出真实程序路径<br/>
-      · 端口程序（如需要管理员权限的程序）启动时可能弹出 UAC 授权
+      ${tips.map((t) => `· ${esc(t)}`).join('<br/>')}
     </div>`;
 
   bindFieldEvents(body, null);
@@ -892,7 +926,7 @@ async function openSettings() {
       <div class="setting" data-focusable data-toggle="autostart" data-autofocus>
         <div class="setting-text">
           <div class="setting-name">开机自启</div>
-          <div class="setting-desc">登录 Windows 后自动打开启动台</div>
+          <div class="setting-desc">${esc(PLAT.text.loginHint)}</div>
         </div>
         <div class="switch ${s.autostart ? 'on' : ''}"></div>
       </div>
@@ -910,13 +944,19 @@ async function openSettings() {
         </div>
         <div class="switch ${s.hideAfterLaunch !== false ? 'on' : ''}"></div>
       </div>
-      <div class="setting" data-focusable data-toggle="boostLaunch">
+      ${PLAT.caps.windowBoost ? `<div class="setting" data-focusable data-toggle="boostLaunch">
         <div class="setting-text">
           <div class="setting-name">新窗口铺满并置顶</div>
           <div class="setting-desc">启动后让程序铺满屏幕并保持最上层（个别程序可能不响应）</div>
         </div>
         <div class="switch ${s.boostLaunch !== false ? 'on' : ''}"></div>
-      </div>
+      </div>` : `<div class="setting" data-focusable style="opacity:.55">
+        <div class="setting-text">
+          <div class="setting-name">新窗口铺满并置顶</div>
+          <div class="setting-desc">仅 Windows 支持：需要把别的程序的窗口改成全屏，macOS / Linux 没有对应接口</div>
+        </div>
+        <div class="badge">Windows</div>
+      </div>`}
       <div class="setting" data-focusable data-toggle="sound">
         <div class="setting-text">
           <div class="setting-name">操作音效</div>
@@ -986,7 +1026,7 @@ async function openSettings() {
       <div class="setting" data-focusable data-action="quit">
         <div class="setting-text">
           <div class="setting-name" style="color:#ffb4b6">退出启动器</div>
-          <div class="setting-desc">关闭程序，返回 Windows 桌面</div>
+          <div class="setting-desc">${esc(PLAT.text.quitHint)}</div>
         </div>
         <div class="badge">退出</div>
       </div>
@@ -1047,7 +1087,7 @@ async function toggleSetting(key, row) {
 
   if (key === 'autostart') {
     const r = await api.setAutostart(next);
-    if (!r || !r.ok) { toast('设置开机自启失败，可能需要以管理员身份运行', 'err', 3200); return; }
+    if (!r || !r.ok) { toast('设置开机自启失败，请检查系统权限', 'err', 3200); return; }
     state.settings.autostart = !!(r.state && r.state.enabled);
     if (state.settings.autostart !== next) toast('开机自启状态未生效', 'err');
     confirmSound();
@@ -1167,7 +1207,7 @@ function openHelp() {
       <div class="setting"><div class="setting-text"><div class="setting-name">鼠标</div><div class="setting-desc">单击启动，右键编辑或移除；按住磁贴可拖动排序</div></div><div class="badge">左 / 右键</div></div>
       <div class="section-label" style="margin-top:12px;padding-left:0">启动后的行为</div>
       <div class="setting"><div class="setting-text"><div class="setting-name">收起启动台</div><div class="setting-desc">启动应用后自动隐藏启动台，避免挡住程序</div></div><div class="badge">设置可关</div></div>
-      <div class="setting"><div class="setting-text"><div class="setting-name">新窗口铺满并置顶</div><div class="setting-desc">按进程找到新窗口，铺满当前显示器并保持最上层</div></div><div class="badge">设置可关</div></div>
+      <div class="setting"><div class="setting-text"><div class="setting-name">新窗口铺满并置顶</div><div class="setting-desc">${PLAT.caps.windowBoost ? '按进程找到新窗口，铺满当前显示器并保持最上层' : '仅 Windows 支持（macOS / Linux 无对应系统接口）'}</div></div><div class="badge">设置可关</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">唤回启动台</div><div class="setting-desc">全局热键；启动台在应用下层时按一下拉到前台，已在前台时按一下收起</div></div><div class="badge">Ctrl+Alt+L</div></div>
       <div class="section-label" style="margin-top:12px;padding-left:0">管理</div>
       <div class="setting"><div class="setting-text"><div class="setting-name">添加 / 编辑 / 移除</div><div class="setting-desc">选择程序文件即可加入，支持一次多选；右键磁贴可直接编辑</div></div><div class="badge">C · E · Del</div></div>
@@ -1504,6 +1544,17 @@ async function repairIcons() {
       state.firstRun = s.firstRun !== false;
       state.dataDir = s.dataDir || '';
       state.version = s.version || '';
+      // 平台信息: 文案与可选项据此调整
+      if (s.platform) {
+        PLAT = {
+          win: s.platform === 'win32',
+          mac: s.platform === 'darwin',
+          linux: s.platform === 'linux',
+          caps: s.caps || PLAT.caps,
+          text: { ...PLAT.text, ...(s.text || {}) },
+        };
+        document.body.dataset.platform = s.platform;
+      }
     }
   } catch (e) {
     toast('初始化失败: ' + e.message, 'err', 4000);

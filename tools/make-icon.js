@@ -165,9 +165,11 @@ const ico = Buffer.concat([dir, ...images]);
 const outDir = path.join(__dirname, '..', 'build');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, 'icon.ico'), ico);
-// 同时留一张 png 便于预览
-const png = encodePNG(256, 256, downsample(256));
-fs.writeFileSync(path.join(outDir, 'icon.png'), png);
+// build/icon.png 是 macOS / Linux 打包时唯一的图标源，electron-builder 要求
+// 至少 512×512（生成 .icns 与多尺寸 png 都靠它），所以这里出 512 的版本 ——
+// 画布本身是 1024（256×4 倍超采样），降采样到 512 依然锐利。
+const png512 = encodePNG(512, 512, downsample(512));
+fs.writeFileSync(path.join(outDir, 'icon.png'), png512);
 
 // 运行时窗口图标必须放在会被打进 app.asar 的目录里 —— build/ 是 electron-builder
 // 的 buildResources 目录, 不会进包, 之前直接把 BrowserWindow.icon 指向它,
@@ -176,10 +178,13 @@ fs.writeFileSync(path.join(outDir, 'icon.png'), png);
 // 而且只能用 PNG: Electron 的 nativeImage 读 ICO 时会把底板的 alpha 丢掉,
 // 任务栏上只剩几个白点(在浅色任务栏里等于空白)。ICO 留给 exe 资源,
 // Windows 的 shell 自己解析, 那条路是正常的。
+// 窗口图标保持 256：任务栏最大按 256 取，再大只是白占内存。
+const png = encodePNG(256, 256, downsample(256));
 const assetsDir = path.join(__dirname, '..', 'src', 'assets');
 fs.mkdirSync(assetsDir, { recursive: true });
 fs.writeFileSync(path.join(assetsDir, 'icon.png'), png);
 fs.writeFileSync(path.join(assetsDir, 'icon.ico'), ico);
 
 console.log('icon.ico', (ico.length / 1024).toFixed(1) + 'KB', 'sizes:', sizes.join(','));
-console.log('icon.png', (png.length / 1024).toFixed(1) + 'KB  (窗口图标用)');
+console.log('icon.png', (png512.length / 1024).toFixed(1) + 'KB  (512x512, mac/linux 打包用)');
+console.log('src/assets/icon.png', (png.length / 1024).toFixed(1) + 'KB  (窗口图标用)');
