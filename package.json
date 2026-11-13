@@ -1,7 +1,7 @@
 {
   "name": "launchplay",
   "productName": "LaunchPlay",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "影音快启 (LaunchPlay) —— 把 Windows 电脑变成电视式全屏大屏启动器，遥控器 / 键盘 / 鼠标都能操作",
   "main": "src/main.js",
   "author": "Taby-Ding",

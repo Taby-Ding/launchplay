@@ -73,18 +73,26 @@ body { user-select: none; }
   pointer-events: none;
   will-change: opacity, filter;
 }
-.bg-photo.on { opacity: 1; }
-.bg-photo.blur { filter: blur(16px) saturate(1.05); }
+.bg-photo.on { opacity: 1; filter: saturate(1.22) contrast(1.02); }
+.bg-photo.blur { filter: blur(16px) saturate(1.3) contrast(1.02); }
 
-/* 暗度 + 暗角: 保证白色文字与图标在任何照片上都读得清 */
+/* 暗度 + 暗角: 保证白色文字与图标在任何照片上都读得清
+   做法是"上下暗带 + 整体压暗": 亮色背景(比如内置那张渐变壁纸)也能保留通透感,
+   而时钟、顶部按钮、底部提示所在的上下两条边始终有足够的暗底 */
 .bg-scrim {
   position: fixed;
   inset: 0;
   z-index: 2;
   pointer-events: none;
   background:
-    radial-gradient(120% 92% at 50% 42%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, .62) 100%),
-    rgba(4, 6, 10, var(--bg-dim, .45));
+    linear-gradient(180deg,
+      rgba(4, 8, 16, .74) 0%,
+      rgba(4, 8, 16, .22) 20%,
+      rgba(4, 8, 16, 0) 34%,
+      rgba(4, 8, 16, 0) 70%,
+      rgba(4, 8, 16, .26) 86%,
+      rgba(4, 8, 16, .76) 100%),
+    rgba(6, 12, 24, var(--bg-dim, .45));
   transition: background .35s var(--ease);
 }
 
@@ -308,25 +316,25 @@ body { user-select: none; }
 }
 .tile.focused .tile-name { color: #fff; }
 
-/* 添加入口磁贴 */
-.tile.tile-add {
-  border-style: dashed;
-  border-color: rgba(255, 255, 255, .18);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(255, 255, 255, .012));
-  color: var(--txt-dim);
+/* ---------------- 拖动排序 ---------------- */
+.tile.dragging {
+  /* 必须写在 .focused 之后才能盖住它的位移/缩放 */
+  transform: scale(1.07) !important;
+  transition: none;
+  cursor: grabbing;
+  z-index: 30;
+  opacity: .96;
+  border-color: rgba(150, 210, 255, .95);
+  background: linear-gradient(180deg, rgba(124, 199, 255, .26), rgba(124, 199, 255, .07));
+  box-shadow:
+    0 0 0 2px rgba(150, 210, 255, .55),
+    0 34px 78px -26px rgba(0, 0, 0, .95),
+    0 0 140px -40px rgba(74, 168, 255, .9);
 }
-.tile.tile-add .tile-icon svg {
-  width: 54%;
-  height: 54%;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-}
-.tile.tile-add.focused {
-  border-style: solid;
-  color: #fff;
-}
+body.is-dragging,
+body.is-dragging .tile { cursor: grabbing; }
+body.is-dragging .tile-name { pointer-events: none; }
+body.is-dragging .tile:not(.dragging) { transition: transform .18s var(--ease); }
 
 /* ---------------- 欢迎语 ---------------- */
 .welcome {
@@ -848,20 +856,21 @@ html[data-size="large"] {
 }
 
 /* ---------------- 自定义背景下的可读性补偿 ----------------
-   照片的明暗不可控, 磁贴/时钟/按钮都加一层半透明底, 保证文字始终可读 */
+   照片的明暗不可控, 磁贴/时钟/按钮都加一层半透明底, 保证文字始终可读。
+   磁贴用"更实的深色玻璃 + 背景虚化": 亮色壁纸上也不会被冲淡成灰块 */
 body.has-bg .tile {
-  background: linear-gradient(180deg, rgba(14, 19, 28, .56), rgba(9, 13, 20, .38));
-  border-color: rgba(255, 255, 255, .12);
+  background: linear-gradient(180deg, rgba(10, 15, 24, .72), rgba(7, 11, 18, .6));
+  border-color: rgba(255, 255, 255, .14);
+  backdrop-filter: blur(20px) saturate(1.15);
 }
 body.has-bg .tile.focused {
-  background: linear-gradient(180deg, rgba(124, 199, 255, .30), rgba(14, 22, 34, .46));
-}
-body.has-bg .tile.tile-add {
-  background: linear-gradient(180deg, rgba(14, 19, 28, .34), rgba(9, 13, 20, .2));
+  background: linear-gradient(180deg, rgba(124, 199, 255, .32), rgba(12, 20, 32, .62));
 }
 body.has-bg .clock {
   text-shadow: 0 2px 26px rgba(0, 0, 0, .82), 0 1px 3px rgba(0, 0, 0, .55);
 }
+body.has-bg .welcome-title { text-shadow: 0 2px 18px rgba(0, 0, 0, .7), 0 1px 3px rgba(0, 0, 0, .5); }
+body.has-bg .welcome-sub { color: rgba(232, 241, 252, .8); text-shadow: 0 1px 12px rgba(0, 0, 0, .8); }
 body.has-bg .date { color: rgba(232, 241, 252, .72); text-shadow: 0 1px 10px rgba(0, 0, 0, .7); }
 body.has-bg .hbtn { background: rgba(8, 12, 18, .42); border-color: rgba(255, 255, 255, .14); }
 body.has-bg .hintbar { border-top-color: rgba(255, 255, 255, .14); color: rgba(226, 236, 248, .58); text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }

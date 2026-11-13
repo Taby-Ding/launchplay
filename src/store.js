@@ -17,13 +17,15 @@ const DEFAULT_SETTINGS = {
   hideHints: false,
   hideAfterLaunch: false, // 启动应用后是否收起启动台(默认不收起, 留在应用下层)
   boostLaunch: true,      // 让新窗口铺满屏幕并置顶
-  // 自定义背景: file 为 backgrounds 目录下的文件名, 空表示用默认渐变
-  background: { file: '', dim: 0.45, blur: false },
+  // 背景: 'default' = 随程序附带的电视背景图, '' = 纯深色渐变,
+  //       其它值为 backgrounds 目录下的自定义图片文件名
+  background: { file: 'default', dim: 0.25, blur: false },
 };
 
 // 配置文件版本: 用于一次性迁移
 //   1 -> 2 : 启动后不再默认收起启动台, 改为留在新窗口下层
-const SCHEMA_VERSION = 2;
+//   2 -> 3 : 内置电视背景图成为默认背景
+const SCHEMA_VERSION = 3;
 
 class Store {
   constructor(dir) {
@@ -58,6 +60,13 @@ class Store {
       // v1 里"启动后收起启动台"默认是开, 老用户未必主动选过 —— 统一改成"不收起"
       this.data.settings.hideAfterLaunch = false;
       this.data.version = 2;
+      this.save();
+    }
+    if (this.data.version < 3) {
+      // v2 及以前默认没有背景图, 3.0 起内置一张电视背景当默认值
+      const bg = this.data.settings.background || {};
+      if (!bg.file) this.data.settings.background = { file: 'default', dim: 0.25, blur: false };
+      this.data.version = 3;
       this.save();
     }
   }

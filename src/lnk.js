@@ -6,6 +6,8 @@
  * 拿到 .lnk 后先尝试解析出真实 exe 路径: 这样既能把图标提取到 256px,
  * 也能避免某些快捷方式带着奇怪的启动参数。
  * 解析失败则退回"直接启动 .lnk", 功能不受影响。
+ *
+ * 解析顺序: 原生二进制解析(1ms) -> PowerShell(兼容 MSI 发布点等特殊情况)。
  */
 
 const fs = require('fs');
@@ -13,6 +15,7 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { RESOLVE_LNK_PS } = require('./ps-scripts');
+const { resolveShortcut } = require('./shortcut');
 
 let seq = 0;
 function tmpFile(ext) {
@@ -64,19 +67,33 @@ async function normalizePick(file, deepLnk = true) {
   const ext = path.extname(file).toLowerCase();
 
   const out = { path: file, name, args: '', iconPath: file, isLnk: ext === '.lnk' };
+  if (ext !== '.lnk' || !deepLnk) return out;
 
-  if (ext === '.lnk' && deepLnk) {
-    try {
-      const r = await runPS(RESOLVE_LNK_PS, [file]);
-      if (r && r.target && fs.existsSync(r.target)) {
-        out.path = r.target;
-        out.args = r.args || '';
-        out.iconPath = r.iconPath || r.target;
-        out.name = (r.name || name).trim() || name;
-        out.resolved = true;
-      }
-    } catch { /* 解析失败就用 .lnk 本身 */ }
-  }
+  // 1) 先走原生解析: 快, 且不依赖 powershell.exe 是否可用
+  try {
+    const r = resolveShortcut(file);
+    if (r && r.target && r.targetExists) {
+      out.path = r.target;
+      out.args = r.args || '';
+      out.iconPath = r.iconExists ? r.iconLocation : r.target;
+      out.name = name;
+      out.resolved = 'native';
+      return out;
+    }
+  } catch { /* 继续尝试 PowerShell */ }
+
+  // 2) 回退: 有些快捷方式(如 MSI 发布点)本地路径为空, 只能交给 Shell 解析
+  try {
+    const r = await runPS(RESOLVE_LNK_PS, [file]);
+    if (r && r.target && fs.existsSync(r.target)) {
+      out.path = r.target;
+      out.args = r.args || '';
+      out.iconPath = r.iconPath || r.target;
+      out.name = (r.name || name).trim() || name;
+      out.resolved = 'powershell';
+    }
+  } catch { /* 解析失败就用 .lnk 本身 */ }
+
   return out;
 }
 

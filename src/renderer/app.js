@@ -18,13 +18,14 @@ const state = {
   settings: {
     autostart: false, fullscreen: true, sound: true,
     tileSize: 'normal', hideHints: false,
-    background: { file: '', dim: 0.45, blur: false },
+    background: { file: 'default', dim: 0.25, blur: false },
   },
   firstRun: true,
   dataDir: '',
   version: '',
   focusId: '',
   isFullscreen: true,
+  suppressLaunchUntil: 0, // 拖动排序结束后短暂屏蔽点击, 避免"松手就启动"
 };
 
 const overlayEl = () => $('#overlay');
@@ -37,6 +38,7 @@ const isOverlayOpen = () => !overlayEl().classList.contains('hidden');
 let pointerMovedAt = 0;
 document.addEventListener('mousemove', () => { pointerMovedAt = Date.now(); }, { passive: true });
 function hoverFocus(el) {
+  if (drag && drag.active) return; // 拖动中别抢焦点
   if (Date.now() - pointerMovedAt < 600) Focus.set(el, { noScroll: true });
 }
 
@@ -254,6 +256,10 @@ function updateClock() {
 /** 背景暗度档位: 0 原图 / 越暗文字越清楚 */
 const BG_DIM_STEPS = [0, 0.25, 0.45, 0.65];
 
+/** 内置壁纸: 空字符串表示"纯深色渐变", 'default' 表示随程序发布的那张图 */
+const DEFAULT_BG_FILE = 'default';
+const DEFAULT_BG_URL = 'assets/bg-default.jpg';
+
 function bgSettings() {
   const b = state.settings.background || {};
   return {
@@ -261,6 +267,12 @@ function bgSettings() {
     dim: typeof b.dim === 'number' ? b.dim : 0.45,
     blur: !!b.blur,
   };
+}
+
+function bgUrlOf(file) {
+  if (!file) return '';
+  if (file === DEFAULT_BG_FILE) return DEFAULT_BG_URL;
+  return `tlapp://bg/${encodeURIComponent(file)}`;
 }
 
 function applyBackground() {
@@ -271,16 +283,19 @@ function applyBackground() {
   const on = !!bg.file;
 
   if (on) {
-    const url = `tlapp://bg/${encodeURIComponent(bg.file)}`;
+    const url = bgUrlOf(bg.file);
     photo.style.backgroundImage = `url("${url}")`;
     photo.classList.add('on');
     document.body.classList.add('has-bg');
 
-    // 图片被手动删掉/损坏时, 别留一层压暗的黑罩 —— 自动退回默认背景
+    // 图片被手动删掉/损坏时, 别留一层压暗的黑罩 —— 自动退回内置壁纸
     const probe = new Image();
     probe.onerror = () => {
       if (bgSettings().file !== bg.file) return;
-      state.settings.background = { ...bgSettings(), file: '' };
+      state.settings.background = {
+        ...bgSettings(),
+        file: bg.file === DEFAULT_BG_FILE ? '' : DEFAULT_BG_FILE,
+      };
       applyBackground();
       persist();
     };
@@ -314,6 +329,92 @@ function letterTile(name) {
   return d;
 }
 
+/* ------------------------- 拖动排序 ------------------------- */
+/**
+ * 磁贴拖动换位: 按下不动就是普通点击(启动), 移动超过 8px 才进入拖动。
+ * 拖动过程中直接调整 DOM 顺序(拖到哪个磁贴的左/右半边就插到那一侧),
+ * 松手后把 DOM 顺序写回 state.items 并落盘。
+ */
+let drag = null;
+
+function tileAtPoint(x, y) {
+  const hit = document.elementFromPoint(x, y);
+  const t = hit && hit.closest ? hit.closest('#grid .tile') : null;
+  return t && t !== drag.el ? t : null;
+}
+
+function onDragMove(ev) {
+  if (!drag) return;
+  if (!drag.active) {
+    if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 8) return;
+    drag.active = true;
+    drag.el.classList.add('dragging');
+    document.body.classList.add('is-dragging');
+    // 让 elementFromPoint 能"看穿"正在拖的那块磁贴
+    drag.el.style.pointerEvents = 'none';
+  }
+  ev.preventDefault();
+
+  const over = tileAtPoint(ev.clientX, ev.clientY);
+  if (over) {
+    const r = over.getBoundingClientRect();
+    const toLeft = ev.clientX < r.left + r.width / 2;
+    const ref = toLeft ? over : over.nextSibling;
+    if (ref !== drag.el) drag.el.parentNode.insertBefore(drag.el, ref); // 已在该位置时 ref 就是自己
+    return;
+  }
+
+  // 拖到磁贴外的空白区域: 上半部分插到最前, 其余落到最后
+  const grid = $('#grid');
+  const stage = $('#stage').getBoundingClientRect();
+  const { clientX: x, clientY: y } = ev;
+  if (x < stage.left || x > stage.right || y < stage.top || y > stage.bottom) return;
+  if (grid.children.length < 2) return;
+
+  const head = grid.firstElementChild === drag.el ? drag.el.nextElementSibling : grid.firstElementChild;
+  if (!head) return;
+  if (y < head.getBoundingClientRect().top) {
+    if (grid.firstElementChild !== drag.el) grid.insertBefore(drag.el, grid.firstElementChild);
+  } else if (grid.lastElementChild !== drag.el) {
+    grid.appendChild(drag.el);
+  }
+}
+
+function endDrag() {
+  const d = drag;
+  drag = null;
+  window.removeEventListener('pointermove', onDragMove, true);
+  window.removeEventListener('pointerup', endDrag, true);
+  window.removeEventListener('pointercancel', endDrag, true);
+  if (!d) return;
+
+  document.body.classList.remove('is-dragging');
+  d.el.classList.remove('dragging');
+  d.el.style.pointerEvents = '';
+  if (!d.active) return;
+
+  // 松手后紧跟的那次 click 不能再当成"启动"
+  state.suppressLaunchUntil = Date.now() + 350;
+
+  const ids = $$('#grid .tile').map((el) => el.dataset.id);
+  const byId = new Map(state.items.map((it) => [it.id, it]));
+  const next = ids.map((id) => byId.get(id)).filter(Boolean);
+  if (next.length === state.items.length) state.items = next;
+  state.focusId = d.id;
+  persist();
+  renderGrid();
+  confirmSound();
+}
+
+function beginDrag(el, item, ev) {
+  if (ev.button !== 0 || state.items.length < 2) return;
+  drag = { el, id: item.id, x: ev.clientX, y: ev.clientY, active: false };
+  window.addEventListener('pointermove', onDragMove, true);
+  window.addEventListener('pointerup', endDrag, true);
+  window.addEventListener('pointercancel', endDrag, true);
+}
+
+/* ------------------------- 磁贴 ------------------------- */
 function makeTile(item) {
   const el = document.createElement('div');
   el.className = 'tile';
@@ -344,28 +445,13 @@ function makeTile(item) {
   el.append(wrap, name);
   // 鼠标按下就把焦点移过来 —— 点开的那个磁贴必须保持高亮,
   // 否则高亮还停在键盘选中的旧磁贴上, 看起来像"没选中就打开了"
-  el.addEventListener('pointerdown', () => Focus.set(el, { noScroll: true }));
+  el.addEventListener('pointerdown', (ev) => {
+    Focus.set(el, { noScroll: true });
+    beginDrag(el, item, ev);
+  });
   el.addEventListener('mouseenter', () => hoverFocus(el));
   el.addEventListener('click', () => launchItem(item));
   el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openEdit(item); });
-  return el;
-}
-
-function makeAddTile() {
-  const el = document.createElement('div');
-  el.className = 'tile tile-add';
-  el.dataset.focusable = '';
-  el.dataset.id = '__add__';
-  el.setAttribute('role', 'button');
-  el.title = '添加应用';
-  el.innerHTML = `
-    <div class="tile-icon">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-    </div>
-    <div class="tile-name">添加应用</div>`;
-  el.addEventListener('pointerdown', () => Focus.set(el, { noScroll: true }));
-  el.addEventListener('mouseenter', () => hoverFocus(el));
-  el.addEventListener('click', openAdd);
   return el;
 }
 
@@ -373,7 +459,6 @@ function renderGrid() {
   const grid = $('#grid');
   const frag = document.createDocumentFragment();
   for (const item of state.items) frag.appendChild(makeTile(item));
-  frag.appendChild(makeAddTile());
   grid.replaceChildren(frag);
 
   $('#welcome').classList.toggle('show', state.items.length === 0);
@@ -386,6 +471,8 @@ function renderGrid() {
 /* ------------------------- 启动 / 电源 ------------------------- */
 async function launchItem(item) {
   if (!item) return;
+  // 拖动排序松手后会有一次"顺手"的 click, 不能当成启动
+  if (Date.now() < (state.suppressLaunchUntil || 0)) return;
   // 兜底: 不管从哪条路径触发启动, 都让被启动的磁贴保持高亮
   const tile = $(`#grid [data-id="${item.id}"]`);
   if (tile && Focus.el !== tile) Focus.set(tile, { noScroll: true });
@@ -444,6 +531,9 @@ function openModal(html, opts = {}) {
   else overlayEl().appendChild(modal);
 
   overlayEl().classList.remove('hidden');
+  // 打开弹层前把旧的视觉焦点清掉: 否则弹层背后的磁贴/按钮会一直亮着,
+  // 弹层里又有另一个高亮, 看起来像"同时选中了两个"
+  if (Focus.el) Focus.el.classList.remove('focused');
   Focus.el = null;
   modalEscHandler = opts.onEsc || null;
 
@@ -461,7 +551,7 @@ function closeModal() {
   modalEscHandler = null;
   Focus.el = null;
   const tiles = Focus.gridTiles();
-  const back = tiles.find((t) => t.dataset.id === state.focusId) || tiles[0];
+  const back = tiles.find((t) => t.dataset.id === state.focusId) || tiles[0] || $('#btnAdd');
   if (back) Focus.set(back, { instant: true });
 }
 
@@ -666,11 +756,13 @@ function bindFieldEvents(body, editing) {
   if ($browse) {
     $browse.addEventListener('click', async () => {
       const r = await api.pickExe();
-      if (!r) return;
-      if ($path) $path.value = r.path || '';
-      if ($name && !$name.value.trim()) $name.value = r.name || '';
-      if (!iconFile && $icon) { iconLabel = '自动'; $icon.value = '自动'; }
-      if (r.path) Focus.set($path || $browse, { noScroll: true });
+      // pickExe 返回数组(支持多选), 编辑面板只取第一个
+      const f = Array.isArray(r) ? r[0] : r;
+      if (!f) return;
+      if ($path) $path.value = f.path || '';
+      if ($name && !$name.value.trim()) $name.value = f.name || '';
+      if (!iconFile && $icon) { iconLabel = '自动'; $icon.value = '自动提取'; }
+      if (f.path) Focus.set($path || $browse, { noScroll: true });
     });
   }
 
@@ -852,12 +944,12 @@ async function openSettings() {
           <div class="setting-name">背景图片</div>
           <div class="setting-desc">用一张自己的图片当客厅墙纸，自动铺满整个屏幕</div>
         </div>
-        <div class="badge" id="bgPicBadge">${bg.file ? '更换' : '选择'}</div>
+        <div class="badge" id="bgPicBadge">${bg.file && bg.file !== DEFAULT_BG_FILE ? '更换' : '选择'}</div>
       </div>
       <div class="setting" data-focusable data-cycle="bgDim">
         <div class="setting-text">
           <div class="setting-name">背景暗度</div>
-          <div class="setting-desc">压暗照片，让磁贴和文字更清楚（0% 为原图）</div>
+          <div class="setting-desc">压暗背景，让磁贴和文字更清楚（0% 为原图）</div>
         </div>
         <div class="badge" id="bgDimBadge">${Math.round(bg.dim * 100)}%</div>
       </div>
@@ -868,12 +960,12 @@ async function openSettings() {
         </div>
         <div class="switch ${bg.blur ? 'on' : ''}" id="bgBlurSwitch"></div>
       </div>
-      <div class="setting" data-focusable data-action="clearBg" id="bgRemoveRow" style="display:${bg.file ? '' : 'none'}">
+      <div class="setting" data-focusable data-action="clearBg" id="bgRemoveRow" style="display:${bg.file && bg.file !== DEFAULT_BG_FILE ? '' : 'none'}">
         <div class="setting-text">
-          <div class="setting-name" style="color:#ffb4b6">移除背景图片</div>
-          <div class="setting-desc">恢复默认的深色渐变背景</div>
+          <div class="setting-name" style="color:#ffb4b6">恢复默认壁纸</div>
+          <div class="setting-desc">丢掉自定义图片，回到自带的那张电视背景</div>
         </div>
-        <div class="badge">移除</div>
+        <div class="badge">恢复</div>
       </div>
 
       <div class="section-label" style="margin-top:14px;padding-left:14px">其它</div>
@@ -1009,14 +1101,15 @@ function cycleSetting(row) {
 /** 设置面板里的背景相关显示同步(选/移除图片后不重建面板, 避免丢失滚动位置) */
 function syncBgRows() {
   const bg = bgSettings();
+  const custom = !!bg.file && bg.file !== DEFAULT_BG_FILE;
   const pic = $('#bgPicBadge');
-  if (pic) pic.textContent = bg.file ? '更换' : '选择';
+  if (pic) pic.textContent = custom ? '更换' : '选择';
   const dim = $('#bgDimBadge');
   if (dim) dim.textContent = Math.round(bg.dim * 100) + '%';
   const sw = $('#bgBlurSwitch');
   if (sw) sw.classList.toggle('on', bg.blur);
   const rm = $('#bgRemoveRow');
-  if (rm) rm.style.display = bg.file ? '' : 'none';
+  if (rm) rm.style.display = custom ? '' : 'none';
 }
 
 async function pickBackground() {
@@ -1038,12 +1131,12 @@ async function pickBackground() {
 }
 
 async function clearBackground() {
-  state.settings.background = { ...bgSettings(), file: '' };
+  state.settings.background = { ...bgSettings(), file: DEFAULT_BG_FILE };
   applyBackground();
   syncBgRows();
   await persist();
   try { await api.clearBackground(); } catch { /* 删不掉也只是留个文件 */ }
-  toast('已恢复默认背景', 'ok', 1500);
+  toast('已恢复默认壁纸', 'ok', 1500);
 }
 
 async function runSettingAction(action) {
@@ -1071,7 +1164,7 @@ function openHelp() {
       <div class="setting"><div class="setting-text"><div class="setting-name">方向键 / 遥控器方向键</div><div class="setting-desc">在磁贴之间移动焦点，自动滚动到可见区域</div></div><div class="badge">↑ ↓ ← →</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">确认 / 启动</div><div class="setting-desc">启动当前选中的应用；在弹窗中执行当前按钮</div></div><div class="badge">Enter / OK</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">返回</div><div class="setting-desc">关闭弹窗；在主界面连续按两次可退出启动器</div></div><div class="badge">Esc / Back</div></div>
-      <div class="setting"><div class="setting-text"><div class="setting-name">鼠标</div><div class="setting-desc">单击启动，右键编辑或移除</div></div><div class="badge">左 / 右键</div></div>
+      <div class="setting"><div class="setting-text"><div class="setting-name">鼠标</div><div class="setting-desc">单击启动，右键编辑或移除；按住磁贴可拖动排序</div></div><div class="badge">左 / 右键</div></div>
       <div class="section-label" style="margin-top:12px;padding-left:0">启动后的行为</div>
       <div class="setting"><div class="setting-text"><div class="setting-name">收起启动台</div><div class="setting-desc">启动应用后自动隐藏启动台，避免挡住程序</div></div><div class="badge">设置可关</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">新窗口铺满并置顶</div><div class="setting-desc">按进程找到新窗口，铺满当前显示器并保持最上层</div></div><div class="badge">设置可关</div></div>
@@ -1079,7 +1172,7 @@ function openHelp() {
       <div class="section-label" style="margin-top:12px;padding-left:0">管理</div>
       <div class="setting"><div class="setting-text"><div class="setting-name">添加 / 编辑 / 移除</div><div class="setting-desc">选择程序文件即可加入，支持一次多选；右键磁贴可直接编辑</div></div><div class="badge">C · E · Del</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">设置</div><div class="setting-desc">开机自启、全屏、音效、图标尺寸</div></div><div class="badge">S</div></div>
-      <div class="setting"><div class="setting-text"><div class="setting-name">背景图片</div><div class="setting-desc">设置 → 外观：选图、调暗度、开关虚化，也能随时移除</div></div><div class="badge">S</div></div>
+      <div class="setting"><div class="setting-text"><div class="setting-name">背景图片</div><div class="setting-desc">默认自带一张渐变壁纸；也可换自己的图，调暗度、开关虚化、随时恢复默认</div></div><div class="badge">S</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">关机 / 重启</div><div class="setting-desc">右上角图标按钮，需二次确认</div></div><div class="badge">Ctrl+Alt+P / R</div></div>
       <div class="setting"><div class="setting-text"><div class="setting-name">全屏切换</div><div class="setting-desc">在沉浸全屏与窗口模式之间切换</div></div><div class="badge">F11</div></div>
     </div>
@@ -1261,7 +1354,6 @@ function activateFocused() {
   const el = Focus.el;
   if (!el) return;
   const id = el.dataset.id;
-  if (id === '__add__') { openAdd(); return; }
   if (id) {
     const item = state.items.find((i) => i.id === id);
     if (item) { launchItem(item); return; }
@@ -1378,6 +1470,31 @@ function pollGamepads() {
 /* =========================================================
    启动
    ========================================================= */
+/**
+ * 启动时把图标补一遍。
+ * 一是补齐没有图标的条目; 二是修正老版本留下的错误图标 ——
+ * 2.1 及以前对 .lnk 直接向 Shell 要图标, 拿到的是"空白页 + 快捷方式箭头"的通用图标。
+ */
+async function repairIcons() {
+  const need = state.items.filter((it) => !it.iconCustom && it.kind !== 'uwp');
+  if (!need.length) return false;
+  let map = null;
+  try {
+    map = await api.ensureIcons(need.map((it) => ({
+      id: it.id, kind: it.kind, target: it.target, appId: it.appId, name: it.name,
+    })));
+  } catch { return false; }
+  if (!map) return false;
+
+  let changed = false;
+  for (const it of need) {
+    const file = map[it.id] ? fileFromUrl(map[it.id]) : '';
+    if (file && file !== it.iconFile) { it.iconFile = file; changed = true; }
+  }
+  if (changed) await persist();
+  return changed;
+}
+
 (async function init() {
   try {
     const s = await api.getState();
@@ -1407,11 +1524,15 @@ function pollGamepads() {
     b.addEventListener('pointerdown', () => Focus.set(b, { noScroll: true }));
   });
 
-  // 首屏焦点
+  // 首屏焦点: 有磁贴就落在磁贴上, 空启动台则落在右上角"添加"按钮
   const first = Focus.firstInGrid();
   if (first) Focus.set(first, { instant: true });
+  else { const add = $('#btnAdd'); if (add) Focus.set(add, { instant: true }); }
 
   requestAnimationFrame(pollGamepads);
+
+  // 图标自愈(异步, 不阻塞首屏)
+  repairIcons().then((changed) => { if (changed) renderGrid(); }).catch(() => {});
 
   // 首次运行: 直接打开添加面板, 引导用户把常用软件放进来(只引导一次)
   if (state.firstRun) {
