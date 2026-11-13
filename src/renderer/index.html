@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' tlapp: data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>影音快启 LaunchPlay</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg-layer"></div>
+
+  <div class="shell">
+    <!-- ======================= 顶部栏 ======================= -->
+    <header class="topbar">
+      <div class="clockbox">
+        <div class="clock" id="clock">--:--</div>
+        <div class="date" id="date">&nbsp;</div>
+      </div>
+
+      <div class="top-actions">
+        <button class="hbtn" id="btnAdd" data-focusable title="添加应用 (C)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="hbtn" id="btnSettings" data-focusable title="设置 (S)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.1A1.7 1.7 0 0 0 15.1 4.7a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.03c.1.63.6 1.14 1.23 1.24H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.03z"/>
+          </svg>
+        </button>
+        <div class="divider"></div>
+        <button class="hbtn hbtn-restart" id="btnRestart" data-focusable title="重启 (Ctrl+Alt+R)">
+          <img src="assets/power-restart.png" alt="重启" draggable="false" />
+        </button>
+        <button class="hbtn hbtn-off" id="btnShutdown" data-focusable title="关机 (Ctrl+Alt+P)">
+          <img src="assets/power-off.png" alt="关机" draggable="false" />
+        </button>
+      </div>
+    </header>
+
+    <!-- ======================= 主体网格 ======================= -->
+    <main class="stage" id="stage">
+      <div class="welcome" id="welcome">
+        <div class="welcome-title">欢迎使用</div>
+        <div class="welcome-sub">选中「添加应用」磁贴，用方向键加 Enter 或直接鼠标点击，即可把常用软件放上来</div>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="tail-space"></div>
+    </main>
+
+    <!-- ======================= 底部提示 ======================= -->
+    <footer class="hintbar" id="hintbar">
+      <span class="hint"><kbd>← ↑ ↓ →</kbd> 移动</span>
+      <span class="hint"><kbd>Enter</kbd> 启动</span>
+      <span class="hint"><kbd>E</kbd> 编辑</span>
+      <span class="hint"><kbd>C</kbd> 添加</span>
+      <span class="hint"><kbd>Del</kbd> 移除</span>
+      <span class="hint"><kbd>S</kbd> 设置</span>
+      <span class="hint"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd> 唤回</span>
+      <span class="hint hint-right"><kbd>Esc</kbd> 返回 / 退出</span>
+    </footer>
+  </div>
+
+  <!-- ======================= 遮罩层容器 ======================= -->
+  <div class="overlay hidden" id="overlay">
+    <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+name: Bug 反馈
+description: 报告一个可以复现的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量把环境信息填完整，尤其是「目标程序是 exe 还是 .lnk」，这两条路径的实现完全不同。
+  - type: input
+    id: version
+    attributes:
+      label: LaunchPlay 版本
+      description: 在 exe 文件名或设置页底部可以看到
+      placeholder: 2.0.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows 版本
+      placeholder: Windows 11 23H2 / Windows 10 22H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 LaunchPlay
+        2. 添加 xxx.exe
+        3. 按 Enter 启动
+        4. 看到 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 如果有截图或录屏，直接拖进来
+    validations:
+      required: true
+  - type: dropdown
+    id: entry-type
+    attributes:
+      label: 出问题的条目类型
+      multiple: true
+      options:
+        - exe 可执行文件
+        - .lnk 快捷方式
+        - 网址 / 协议链接
+        - 与添加条目的操作无关
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 例如是否开启"新窗口铺满并置顶"、是否多显示器、是否有杀软拦截

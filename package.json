@@ -1,0 +1,74 @@
+{
+  "name": "launchplay",
+  "productName": "LaunchPlay",
+  "version": "2.0.0",
+  "description": "影音快启 (LaunchPlay) —— 把 Windows 电脑变成电视式全屏大屏启动器，遥控器 / 键盘 / 鼠标都能操作",
+  "main": "src/main.js",
+  "author": "Taby-Ding",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taby-Ding/launchplay.git"
+  },
+  "homepage": "https://github.com/Taby-Ding/launchplay#readme",
+  "bugs": {
+    "url": "https://github.com/Taby-Ding/launchplay/issues"
+  },
+  "keywords": [
+    "electron",
+    "launcher",
+    "htpc",
+    "tv",
+    "windows",
+    "kiosk",
+    "remote-control",
+    "media-center"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "icon": "node tools/make-icon.js",
+    "prepare-electron": "node tools/prepare-electron.js",
+    "predist": "node tools/prepare-electron.js",
+    "dist": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "38.2.2",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.launchplay.desktop",
+    "productName": "LaunchPlay",
+    "asar": true,
+    "compression": "maximum",
+    "electronDist": "build/electron-dist",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/node_modules/**/{test,__tests__,tests,example,examples,docs,doc}/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "LaunchPlay-${version}-portable.exe",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "portable": {
+      "artifactName": "LaunchPlay-${version}-portable.exe",
+      "unpackDirName": "LaunchPlay"
+    }
+  }
+}
