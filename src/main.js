@@ -19,6 +19,7 @@ const autostart = require('./autostart');
 const { power } = require('./power');
 const { launchItem } = require('./launch');
 const { media } = require('./media');
+const { winInput, VK } = require('./wininput');
 const { RemoteService } = require('./remote');
 
 const isDev = !app.isPackaged;
@@ -614,26 +615,81 @@ function setupIpc() {
  *   - 系统类(音量/播放/关机/重启/关闭程序)主进程直接做。
  * 关机/重启执行前先让渲染层弹确认框, 手机端也已经做了一次确认(双保险)。
  */
-function handleRemoteAction(action) {
-  // 导航类 -> 渲染层(复用现有 Focus / activateFocused / handleBack)
-  if (['up', 'down', 'left', 'right', 'ok', 'back'].includes(action)) {
-    if (win && !win.isDestroyed()) win.webContents.send('remote:nav', action);
-    return { ok: true };
+/**
+ * 启动台当前是否处于"用户正在操作"的状态。
+ * 可见且聚焦 -> 导航键应该走界面焦点系统；
+ * 隐藏 / 失焦(在看爱奇艺等程序) -> 导航键应该注入到前台程序。
+ */
+function launcherActive() {
+  return !!(win && !win.isDestroyed() && win.isVisible() && win.isFocused());
+}
+
+/** 把按键注入到前台程序；非 Windows 或注入进程异常时明确返回 */
+async function injectKey(vk, label) {
+  if (!WIN) return { ok: false, error: '键盘注入仅 Windows 支持' };
+  const r = await winInput.key(typeof vk === 'number' ? vk : (VK[vk] || 0));
+  if (!r.ok && win && !win.isDestroyed()) {
+    win.webContents.send('remote:toast', `按键注入失败：${r.error || '未知原因'}`);
   }
+  return r.ok ? { ok: true, injected: label || vk } : r;
+}
+
+function handleRemoteAction(action, params = {}) {
+  // ---- 导航类：自动跟随 ----------------------------------------------
+  // 启动台在前台 -> 复用渲染层 Focus / activateFocused / handleBack；
+  // 启动台隐藏或失焦(用户在看视频) -> 注入真实键盘到前台程序：
+  //   上/下=音量±  左/右=快退/快进  确定=播放暂停  返回=退出全屏/Esc
+  //   这是爱奇艺/腾讯视频等播放器通用的键盘约定。
+  if (['up', 'down', 'left', 'right', 'ok', 'back'].includes(action)) {
+    if (launcherActive()) {
+      if (win && !win.isDestroyed()) win.webContents.send('remote:nav', action);
+      return { ok: true, mode: 'focus' };
+    }
+    const map = { up: 'volup', down: 'voldown', left: 'left', right: 'right', ok: 'space', back: 'esc' };
+    return injectKey(map[action], action).then((r) => ({ ...r, mode: 'inject' }));
+  }
+
+  // ---- 播放控制：始终注入真实键盘（不受启动台焦点影响） ----------------
+  if (action === 'playpause') return injectKey('space', '播放/暂停');
+  if (action === 'ffwd') return injectKey('right', '快进');
+  if (action === 'rew') return injectKey('left', '快退');
+  if (action === 'fullscreen') return injectKey('f', '全屏');
+
+  // ---- 唤出 / 收起启动台 ---------------------------------------------
   if (action === 'toggle' || action === 'home') {
     toggleLauncher();
     return { ok: true };
   }
-  // 媒体控制
+
+  // ---- 系统媒体键（音量对系统生效，播放器不认时用） -------------------
   if (['volup', 'voldown', 'mute', 'play', 'next', 'prev'].includes(action)) {
     return media(action);
   }
-  // 电源: 走渲染层的确认弹窗, 用户在大屏上再确认一次
+
+  // ---- 鼠标 / 键盘模拟 ------------------------------------------------
+  if (!WIN) return { ok: false, error: '键鼠模拟仅 Windows 支持' };
+  switch (action) {
+    case 'mmove':  return winInput.move(params.dx, params.dy);
+    case 'mclick': return winInput.click();
+    case 'mrclick': return winInput.rclick();
+    case 'mdown':  return winInput.mdown();
+    case 'mup':    return winInput.mup();
+    case 'mwheel': return winInput.wheel(params.delta);
+    case 'type':   return (params.text ? winInput.type(params.text) : Promise.resolve({ ok: false, error: '文本为空' }));
+    case 'key': {
+      const vk = params.key;
+      const code = typeof vk === 'number' ? vk : (VK[vk] || 0);
+      if (!code) return { ok: false, error: '未知按键' };
+      return winInput.key(code);
+    }
+  }
+
+  // ---- 电源: 走渲染层的确认弹窗, 用户在大屏上再确认一次 ----------------
   if (action === 'shutdown' || action === 'restart') {
     if (win && !win.isDestroyed()) win.webContents.send('remote:power', action);
     return { ok: true, pending: true };
   }
-  // 关闭最近启动的程序
+  // ---- 关闭最近启动的程序 ---------------------------------------------
   if (action === 'closeapp') {
     if (!lastLaunchedPid) {
       if (win && !win.isDestroyed()) {
@@ -745,6 +801,7 @@ if (!gotLock) {
     if (store) store.flush();
     try { globalShortcut.unregisterAll(); } catch {}
     try { if (remote) remote.stop(); } catch { /* ignore */ }
+    try { winInput.stop(); } catch { /* ignore */ }
     stopBoost();
   });
 }

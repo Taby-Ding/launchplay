@@ -26,7 +26,58 @@ const ALLOWED = new Set([
   'toggle', 'home', 'shutdown', 'restart',
   'volup', 'voldown', 'mute', 'play', 'next', 'prev',
   'closeapp',
+  // 播放控制（自动跟随：注入真实键盘）
+  'playpause', 'ffwd', 'rew', 'fullscreen',
+  // 鼠标 / 键盘模拟（注入到前台程序）
+  'mmove', 'mclick', 'mrclick', 'mdown', 'mup', 'mwheel', 'type', 'key',
 ]);
+
+/** 需要携带参数的指令；其余指令忽略 payload，避免夹带 */
+const PARAM_ACTIONS = new Set(['mmove', 'mwheel', 'type', 'key']);
+
+/** key 指令允许的键名（映射到 Windows 虚拟键；也可直接传 1-254 的数字） */
+const KEY_NAMES = new Set([
+  'up', 'down', 'left', 'right', 'space', 'enter', 'esc', 'tab',
+  'backspace', 'del', 'f', 'f11', 'volup', 'voldown', 'mute',
+  'next', 'prev', 'play', 'ctrl', 'shift', 'alt',
+  'a', 'b', 'c', 'd', 'e', 'f2', 'home', 'end', 'pgup', 'pgdn',
+]);
+
+/** 数值夹取（防止异常大参数） */
+function clampNum(v, lo, hi, def = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : def;
+}
+
+/**
+ * 按指令类型提取并校验参数，返回干净的参数对象。
+ * 未知字段一律丢弃；文本限制长度、数值限制范围，避免被当成跳板。
+ */
+function sanitizeParams(action, payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  switch (action) {
+    case 'mmove':
+      return { dx: clampNum(p.dx, -800, 800), dy: clampNum(p.dy, -800, 800) };
+    case 'mwheel':
+      return { delta: clampNum(p.delta, -1200, 1200) };
+    case 'type': {
+      const text = typeof p.text === 'string' ? p.text.slice(0, 500) : '';
+      return { text };
+    }
+    case 'key': {
+      const raw = p.key;
+      if (typeof raw === 'string' && KEY_NAMES.has(raw.toLowerCase())) return { key: raw.toLowerCase() };
+      if (Number.isInteger(raw) && raw >= 1 && raw <= 254) return { key: raw };
+      if (typeof raw === 'string' && /^\d{1,3}$/.test(raw)) {
+        const n = Number(raw);
+        if (n >= 1 && n <= 254) return { key: n };
+      }
+      return null; // 非法键名 -> 拒绝
+    }
+    default:
+      return {};
+  }
+}
 
 /** 列出可用于局域网的 IPv4（排除回环、APIPA 169.254） */
 function lanAddresses() {
@@ -125,8 +176,10 @@ class RemoteService {
           const action = String(payload.action || '');
           if (token !== self.token) return json(res, 403, { ok: false, error: '配对码不正确' });
           if (!ALLOWED.has(action)) return json(res, 400, { ok: false, error: '未知指令' });
+          const params = PARAM_ACTIONS.has(action) ? sanitizeParams(action, payload) : {};
+          if (params === null) return json(res, 400, { ok: false, error: '指令参数不合法' });
           try {
-            const result = await self.onAction(action);
+            const result = await self.onAction(action, params);
             return json(res, 200, { ok: true, action, ...(result && typeof result === 'object' ? result : {}) });
           } catch (e) {
             return json(res, 500, { ok: false, error: (e && e.message) || '执行失败' });

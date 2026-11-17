@@ -876,4 +876,31 @@ body.has-bg .hbtn { background: rgba(8, 12, 18, .42); border-color: rgba(255, 25
 body.has-bg .hintbar { border-top-color: rgba(255, 255, 255, .14); color: rgba(226, 236, 248, .58); text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }
 body.has-bg kbd { background: rgba(8, 12, 18, .5); border-color: rgba(255, 255, 255, .16); color: rgba(240, 246, 255, .85); }
 
+/* ===== 手机遥控常驻二维码角标 ===== */
+.remote-badge {
+  position: fixed; right: 26px; bottom: 78px; z-index: 60;
+  width: 104px; padding: 8px 8px 6px;
+  background: rgba(10, 16, 28, .82); border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, .45);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  text-align: center; cursor: grab; user-select: none;
+  transition: opacity .25s, transform .15s;
+}
+.remote-badge.hidden { display: none; }
+.remote-badge:hover { background: rgba(14, 22, 38, .94); transform: translateY(-2px); }
+.remote-badge.dragging { cursor: grabbing; opacity: .9; transform: none; }
+.rb-grip {
+  position: absolute; top: 4px; right: 7px; font-size: 13px; line-height: 1;
+  color: rgba(255, 255, 255, .35); cursor: grab; letter-spacing: -2px;
+}
+.rb-qr {
+  width: 88px; height: 88px; margin: 0 auto; border-radius: 8px;
+  background: #fff; overflow: hidden; line-height: 0;
+}
+.rb-qr svg { width: 100%; height: 100%; display: block; }
+.rb-label {
+  margin-top: 5px; font-size: 11px; color: rgba(232, 241, 252, .85);
+  letter-spacing: .5px;
+}
+
 

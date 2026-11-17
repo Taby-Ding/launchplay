@@ -1221,6 +1221,88 @@ function qrDataUri(svg) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
+/* ---- 常驻二维码角标：遥控开启时在大屏角落常驻，扫码即用，可拖动 ---- */
+let remoteBadgeInfo = null; // 当前有效的遥控连接信息（running 时非空）
+
+function showRemoteBadge(info) {
+  remoteBadgeInfo = info || remoteBadgeInfo;
+  const badge = $('#remoteBadge');
+  if (!badge || !remoteBadgeInfo || !remoteBadgeInfo.qrSvg) return;
+  const qr = $('#rbQr');
+  // 角标里直接渲染 SVG（CSP 允许内联 style；SVG 本身无脚本）
+  qr.innerHTML = remoteBadgeInfo.qrSvg;
+  badge.classList.remove('hidden');
+  // 恢复上次的停靠位置
+  const pos = state.settings.remoteBadgePos;
+  if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+    placeBadge(pos.x, pos.y);
+  }
+}
+
+function hideRemoteBadge() {
+  remoteBadgeInfo = null;
+  const badge = $('#remoteBadge');
+  if (badge) badge.classList.add('hidden');
+}
+
+function placeBadge(x, y) {
+  const badge = $('#remoteBadge');
+  if (!badge) return;
+  const w = badge.offsetWidth || 104, h = badge.offsetHeight || 130;
+  const maxX = Math.max(8, window.innerWidth - w - 8);
+  const maxY = Math.max(8, window.innerHeight - h - 8);
+  badge.style.left = Math.max(8, Math.min(maxX, x)) + 'px';
+  badge.style.top = Math.max(8, Math.min(maxY, y)) + 'px';
+  badge.style.right = 'auto';
+  badge.style.bottom = 'auto';
+}
+
+/** 角标的点击(看大图)与拖动绑定，只需绑一次 */
+function bindRemoteBadge() {
+  const badge = $('#remoteBadge');
+  if (!badge || badge._bound) return;
+  badge._bound = true;
+
+  badge.addEventListener('click', async (e) => {
+    if (badge._dragged) { badge._dragged = false; return; }
+    await openPhoneRemote();
+  });
+
+  let dragging = false, moved = false, offX = 0, offY = 0;
+  const startDrag = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    dragging = true; moved = false;
+    const r = badge.getBoundingClientRect();
+    offX = e.clientX - r.left; offY = e.clientY - r.top;
+    badge.classList.add('dragging');
+    badge.setPointerCapture && badge.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onDrag = (e) => {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - (badge.getBoundingClientRect().left + offX)) > 2 ||
+        Math.abs(e.clientY - (badge.getBoundingClientRect().top + offY)) > 2) moved = true;
+    placeBadge(e.clientX - offX, e.clientY - offY);
+    e.preventDefault();
+  };
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    badge.classList.remove('dragging');
+    if (moved) {
+      badge._dragged = true;
+      const r = badge.getBoundingClientRect();
+      state.settings.remoteBadgePos = { x: r.left, y: r.top };
+      api.saveState({ settings: { remoteBadgePos: state.settings.remoteBadgePos } }).catch(() => {});
+    }
+    e.preventDefault();
+  };
+  badge.addEventListener('pointerdown', startDrag);
+  badge.addEventListener('pointermove', onDrag);
+  badge.addEventListener('pointerup', endDrag);
+  badge.addEventListener('pointercancel', endDrag);
+}
+
 /**
  * 打开/刷新"手机遥控"面板：开启服务、显示二维码与配对码。
  * 服务开启后会一直运行直到主动停止或关闭程序；关掉这个弹窗不影响连接。
@@ -1238,6 +1320,7 @@ async function openPhoneRemote(rotate) {
     toast('遥控服务开启失败：' + ((info && info.error) || '未知错误'), 'err', 4000);
     return;
   }
+  showRemoteBadge(info); // 大屏角落常驻二维码
 
   openModal(`
     <div class="m-head">
@@ -1281,6 +1364,7 @@ async function openPhoneRemote(rotate) {
     if (b.dataset.rAction === 'rotate') { await openPhoneRemote(true); return; }
     if (b.dataset.rAction === 'stop') {
       await api.remoteStop();
+      hideRemoteBadge();
       closeModal();
       toast('手机遥控已停止', 'ok', 1800);
     }
@@ -1724,6 +1808,15 @@ async function repairIcons() {
   else { const add = $('#btnAdd'); if (add) Focus.set(add, { instant: true }); }
 
   requestAnimationFrame(pollGamepads);
+
+  // 手机遥控角标：若服务仍在运行(本次会话内关掉弹窗但没停止)，恢复常驻二维码
+  bindRemoteBadge();
+  if (api && api.remoteStatus) {
+    api.remoteStatus().then((st) => {
+      if (st && st.running) showRemoteBadge(st);
+      else hideRemoteBadge();
+    }).catch(() => {});
+  }
 
   // 图标自愈(异步, 不阻塞首屏)
   repairIcons().then((changed) => { if (changed) renderGrid(); }).catch(() => {});
