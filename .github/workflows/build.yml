@@ -42,8 +42,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate icon
-        run: npm run icon
+      # 品牌图标(build/icon.ico、build/icon.png、src/assets/icon.png)已作为资产提交进仓库,
+      # 不再在构建时生成 —— 旧的 npm run icon 会用已废弃的程序内绘制图标覆盖新品牌图标。
 
       # ubuntu-latest 升到 24.04 后默认没有 libfuse2，而 appimagetool 本身
       # 就是个 AppImage，缺了它会在生成阶段直接失败（本地 Windows 打 AppImage
