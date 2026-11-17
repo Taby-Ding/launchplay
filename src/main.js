@@ -18,6 +18,8 @@ const { WIN, MAC, LINUX, caps, text: PTEXT } = require('./platform');
 const autostart = require('./autostart');
 const { power } = require('./power');
 const { launchItem } = require('./launch');
+const { media } = require('./media');
+const { RemoteService } = require('./remote');
 
 const isDev = !app.isPackaged;
 const CAPTURE = process.env.TL_CAPTURE || '';
@@ -107,6 +109,8 @@ let store = null;
 let icons = null;
 let win = null;
 let hotkeyOk = false;   // 唤回热键是否注册成功(没注册成功就不自动收起, 免得回不来)
+let remote = null;      // 手机遥控服务(默认关闭, 设置里点开启才启动)
+let lastLaunchedPid = 0; // 最近一次由启动台打开的程序 pid, 供手机"关闭程序"使用
 
 /* ------------------------- 图标协议 ------------------------- */
 protocol.registerSchemesAsPrivileged([
@@ -353,6 +357,10 @@ function setupAutostartContext() {
 function afterLaunch(pid) {
   const s = (store && store.settings) || {};
 
+  // 记下最近启动的程序, 手机遥控的"关闭程序"就关它
+  // (pid 为 0 表示系统方式打开、拿不到句柄, 这时关闭会给出提示)
+  lastLaunchedPid = pid || 0;
+
   if (win && !win.isDestroyed()) {
     if (s.hideAfterLaunch === true) {
       if (hotkeyOk) {
@@ -566,6 +574,110 @@ function setupIpc() {
     if (/^https?:/i.test(p)) shell.openExternal(p);
     else shell.openPath(p);
   });
+
+  /* ---- 手机遥控 ---- */
+  ipcMain.handle('remote:start', async () => {
+    try {
+      if (!remote) {
+        remote = new RemoteService(handleRemoteAction);
+        remote.setPage(remotePageHtml());
+      }
+      const info = await remote.start();
+      console.log('[remote] started at', info.url);
+      return { ok: true, ...info };
+    } catch (e) {
+      console.error('[remote] start failed', e && e.message);
+      return { ok: false, error: (e && e.message) || '启动失败' };
+    }
+  });
+
+  ipcMain.handle('remote:stop', () => {
+    if (remote) remote.stop();
+    return { ok: true, running: false };
+  });
+
+  ipcMain.handle('remote:status', () => {
+    return remote && remote.running ? remote.info() : { running: false };
+  });
+
+  ipcMain.handle('remote:rotate', () => {
+    if (!remote || !remote.running) return { ok: false, error: '遥控服务未开启' };
+    return { ok: true, ...remote.rotateToken() };
+  });
+}
+
+/* ------------------------- 手机遥控 ------------------------- */
+/**
+ * 把手机指令映射成实际动作。
+ * 分两类：
+ *   - 导航类(方向/确定/返回/唤出)需要渲染层的焦点系统参与, 发给渲染层执行;
+ *   - 系统类(音量/播放/关机/重启/关闭程序)主进程直接做。
+ * 关机/重启执行前先让渲染层弹确认框, 手机端也已经做了一次确认(双保险)。
+ */
+function handleRemoteAction(action) {
+  // 导航类 -> 渲染层(复用现有 Focus / activateFocused / handleBack)
+  if (['up', 'down', 'left', 'right', 'ok', 'back'].includes(action)) {
+    if (win && !win.isDestroyed()) win.webContents.send('remote:nav', action);
+    return { ok: true };
+  }
+  if (action === 'toggle' || action === 'home') {
+    toggleLauncher();
+    return { ok: true };
+  }
+  // 媒体控制
+  if (['volup', 'voldown', 'mute', 'play', 'next', 'prev'].includes(action)) {
+    return media(action);
+  }
+  // 电源: 走渲染层的确认弹窗, 用户在大屏上再确认一次
+  if (action === 'shutdown' || action === 'restart') {
+    if (win && !win.isDestroyed()) win.webContents.send('remote:power', action);
+    return { ok: true, pending: true };
+  }
+  // 关闭最近启动的程序
+  if (action === 'closeapp') {
+    if (!lastLaunchedPid) {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('remote:toast', '没有可关闭的程序（该应用由系统方式打开）');
+      }
+      return { ok: false, error: '没有可关闭的程序' };
+    }
+    return terminatePid(lastLaunchedPid).then((r) => {
+      if (r.ok) lastLaunchedPid = 0;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('remote:toast', r.ok ? '已关闭上一个程序' : ('关闭失败：' + (r.error || '未知原因')));
+      }
+      return r;
+    });
+  }
+  return { ok: false, error: '未知指令' };
+}
+
+/** 结束一个进程: Windows 用 taskkill /T 连子进程一起关, 其余用 SIGTERM */
+function terminatePid(pid) {
+  const { spawn } = require('child_process');
+  if (WIN) {
+    return new Promise((resolve) => {
+      const c = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      let done = false;
+      c.once('error', (e) => { if (!done) { done = true; resolve({ ok: false, error: e.message }); } });
+      c.once('close', (code) => { if (!done) { done = true; resolve(code === 0 ? { ok: true } : { ok: false, error: `进程已退出或无权关闭（code ${code}）` }); } });
+    });
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+    return Promise.resolve({ ok: true });
+  } catch (e) {
+    return Promise.resolve({ ok: false, error: e.message });
+  }
+}
+
+/** 读取遥控页面 HTML(打包后也在 asar 内, 走文件路径读取) */
+function remotePageHtml() {
+  const p = path.join(__dirname, 'renderer', 'remote.html');
+  try { return fs.readFileSync(p, 'utf8'); } catch (e) {
+    console.error('[remote] 读取遥控页面失败', e && e.message);
+    return '';
+  }
 }
 
 /* ------------------------- 生命周期 ------------------------- */
@@ -632,6 +744,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     if (store) store.flush();
     try { globalShortcut.unregisterAll(); } catch {}
+    try { if (remote) remote.stop(); } catch { /* ignore */ }
     stopBoost();
   });
 }

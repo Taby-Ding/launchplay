@@ -32,4 +32,13 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.invoke('win:minimize'),
   quit: () => ipcRenderer.invoke('win:quit'),
   openPath: (p) => ipcRenderer.invoke('os:open-path', p),
+
+  // 手机遥控
+  remoteStart: () => ipcRenderer.invoke('remote:start'),
+  remoteStop: () => ipcRenderer.invoke('remote:stop'),
+  remoteStatus: () => ipcRenderer.invoke('remote:status'),
+  remoteRotate: () => ipcRenderer.invoke('remote:rotate'),
+  onRemoteNav: (cb) => ipcRenderer.on('remote:nav', (_e, action) => cb(action)),
+  onRemotePower: (cb) => ipcRenderer.on('remote:power', (_e, action) => cb(action)),
+  onRemoteToast: (cb) => ipcRenderer.on('remote:toast', (_e, text) => cb(text)),
 });

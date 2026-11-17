@@ -1024,6 +1024,15 @@ async function openSettings() {
         <div class="badge">恢复</div>
       </div>
 
+      <div class="section-label" style="margin-top:14px;padding-left:14px">手机遥控</div>
+      <div class="setting" data-focusable data-action="phoneRemote" data-autofocus>
+        <div class="setting-text">
+          <div class="setting-name">扫码用手机遥控</div>
+          <div class="setting-desc">手机与电脑连同一 WiFi，扫码后即可用手机控制大屏</div>
+        </div>
+        <div class="badge">开启</div>
+      </div>
+
       <div class="section-label" style="margin-top:14px;padding-left:14px">其它</div>
       <div class="setting" data-focusable data-action="dataDir">
         <div class="setting-text">
@@ -1200,7 +1209,82 @@ async function runSettingAction(action) {
   if (action === 'clearBg') { await clearBackground(); return; }
   if (action === 'dataDir') { api.openPath(state.dataDir); return; }
   if (action === 'help') { openHelp(); return; }
+  if (action === 'phoneRemote') { await openPhoneRemote(); return; }
   if (action === 'quit') { await persist(); api.quit(); }
+}
+
+/* =========================================================
+   手机遥控
+   ========================================================= */
+/** 把二维码 SVG 变成可放进 <img> 的 data URI */
+function qrDataUri(svg) {
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+/**
+ * 打开/刷新"手机遥控"面板：开启服务、显示二维码与配对码。
+ * 服务开启后会一直运行直到主动停止或关闭程序；关掉这个弹窗不影响连接。
+ */
+async function openPhoneRemote(rotate) {
+  toast(rotate ? '正在更换配对码…' : '正在开启遥控服务…', 'ok', 1200);
+  let info;
+  if (rotate) {
+    info = await api.remoteRotate();
+  } else {
+    const status = await api.remoteStatus();
+    info = (status && status.running) ? status : await api.remoteStart();
+  }
+  if (!info || info.ok === false || !info.running) {
+    toast('遥控服务开启失败：' + ((info && info.error) || '未知错误'), 'err', 4000);
+    return;
+  }
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">手机遥控</div>
+        <div class="m-sub">手机扫码即可把大屏"握在手里"</div>
+      </div>
+      <button class="btn btn-icon-only" data-close data-focusable title="关闭">✕</button>
+    </div>
+    <div class="m-body" style="text-align:center">
+      <div style="display:inline-block;background:#fff;padding:12px;border-radius:14px;line-height:0">
+        <img src="${qrDataUri(info.qrSvg)}" alt="扫码遥控二维码" style="width:216px;height:216px" />
+      </div>
+      <div style="font-size:15px;font-weight:600;margin-top:14px">用手机相机扫码打开遥控页</div>
+      <div style="font-size:13px;color:var(--muted,#93a0c4);margin-top:8px;line-height:1.7">
+        若扫不出来，可在手机浏览器手动输入：<br/>
+        <span style="font-family:monospace;word-break:break-all;user-select:text">${esc(info.url)}</span>
+      </div>
+      <div style="display:inline-flex;align-items:center;gap:10px;margin-top:14px;padding:8px 16px;border:1px solid var(--line,#2a3452);border-radius:10px">
+        <span style="font-size:12px;opacity:.7">本机地址</span>
+        <span style="font-family:monospace">${esc(info.address)}:${esc(info.port)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted,#93a0c4);margin-top:14px;line-height:1.8;text-align:left">
+        · 手机必须与电脑连接<strong>同一个 WiFi</strong><br/>
+        · 首次开启时 Windows 可能弹出防火墙提示，请勾选"专用网络"并允许<br/>
+        · 配对码每次开启随机生成，别人扫到也无法控制<br/>
+        · 地址随网络变化；换网络后请重新打开此页获取新二维码
+      </div>
+    </div>
+    <div class="m-foot" style="justify-content:center;gap:10px;flex-wrap:wrap">
+      <button class="btn" data-r-action="rotate" data-focusable>换一个配对码</button>
+      <button class="btn" data-r-action="stop" data-focusable>停止遥控</button>
+      <button class="btn btn-primary" data-close data-focusable>完成</button>
+    </div>
+  `, { narrow: true, autofocus: '[data-r-action="stop"]' });
+
+  bindClose();
+  $('#modal').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-r-action]');
+    if (!b) return;
+    if (b.dataset.rAction === 'rotate') { await openPhoneRemote(true); return; }
+    if (b.dataset.rAction === 'stop') {
+      await api.remoteStop();
+      closeModal();
+      toast('手机遥控已停止', 'ok', 1800);
+    }
+  });
 }
 
 /* =========================================================
@@ -1320,9 +1404,37 @@ async function addMany(files) {
 }
 
 /* =========================================================
-   键盘 / 遥控器 / 手柄
+   键盘 / 遥控器 / 手柄 / 手机
    ========================================================= */
 let lastEscAt = 0;
+
+/* ---- 手机遥控：主进程把指令转到这里，复用同一套焦点系统 ---- */
+if (api && api.onRemoteNav) {
+  api.onRemoteNav((action) => {
+    // 输入框里只认上下, 与键盘行为保持一致
+    if (isField(document.activeElement) && action !== 'back' && action !== 'ok') {
+      if (action === 'up' || action === 'down') {
+        Focus.move(action);
+        const el = Focus.el;
+        if (el && el !== document.activeElement) {
+          if (el.tagName === 'INPUT') el.focus({ preventScroll: true });
+          else if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        }
+      }
+      return;
+    }
+    if (['up', 'down', 'left', 'right'].includes(action)) { Focus.move(action); return; }
+    if (action === 'ok') { confirmSound(); confirmFocused(); return; }
+    if (action === 'back') { handleBack(); return; }
+  });
+
+  api.onRemotePower((kind) => {
+    // 大屏上再确认一次, 避免手机误触直接关机
+    if (kind === 'shutdown' || kind === 'restart') askPower(kind);
+  });
+
+  api.onRemoteToast((text) => { if (text) toast(text, 'ok', 2200); });
+}
 
 function isField(el) {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
@@ -1386,8 +1498,7 @@ document.addEventListener('keydown', (e) => {
   if (isOverlayOpen()) {
     if (k === 'Enter' || k === 'NumpadEnter' || k === ' ') {
       e.preventDefault();
-      const el = Focus.el;
-      if (el) { el.click(); confirmSound(); }
+      confirmFocused();
     }
     return;
   }
@@ -1395,7 +1506,7 @@ document.addEventListener('keydown', (e) => {
   const low = k.toLowerCase();
   if (k === 'Enter' || k === 'NumpadEnter' || k === ' ') {
     e.preventDefault();
-    activateFocused();
+    confirmFocused();
     return;
   }
   if (low === 'c' || k === 'Insert') { e.preventDefault(); openAdd(); return; }
@@ -1406,6 +1517,16 @@ document.addEventListener('keydown', (e) => {
   if (k === 'End') { e.preventDefault(); const t = Focus.gridTiles().slice(-1)[0]; if (t) Focus.set(t); return; }
   if (k === 'F1') { e.preventDefault(); openHelp(); return; }
 });
+
+/** 确认当前焦点：弹窗里点按钮，主界面里启动磁贴。键盘 Enter 与手机"确定"共用 */
+function confirmFocused() {
+  if (isOverlayOpen()) {
+    const el = Focus.el;
+    if (el) { el.click(); confirmSound(); }
+    return;
+  }
+  activateFocused();
+}
 
 function activateFocused() {
   const el = Focus.el;
