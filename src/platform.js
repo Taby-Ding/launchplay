@@ -24,6 +24,7 @@ const LINUX = OS === 'linux';
 
 const caps = {
   windowBoost: WIN, // SetWindowPos 是 Win32 独有的
+  autoHideTaskbar: WIN, // SHAppBarMessage(ABM_SETSTATE) 是 Win32 独有的
   elevate: WIN,     // ShellExecute RunAs / UAC
   uwp: WIN,
   shellLink: WIN,   // .lnk

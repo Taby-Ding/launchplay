@@ -1,6 +1,6 @@
 <div align="center">
 
-# 影音快启 · LaunchPlay
+# 影游快启
 
 **把电脑变成一台电视。**
 
@@ -8,7 +8,7 @@
 
 ![Build](https://github.com/Taby-Ding/launchplay/actions/workflows/build.yml/badge.svg)
 
-![License: MIT](https://img.shields.io/badge/License-MIT-4aa8ff.svg)
+![License: 个人免费/商用授权](https://img.shields.io/badge/License-个人免费%2F商用授权-orange.svg)
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-4aa8ff.svg)
 
@@ -18,7 +18,9 @@
 
 </div>
 
-![LaunchPlay 主界面](docs/screenshots/main.png)
+![影游快启](docs/banner.jpg)
+
+![影游快启 主界面](docs/screenshots/main.png)
 
 ---
 
@@ -26,11 +28,21 @@
 
 | 平台 | 架构 | 文件 | 大小 | 说明 |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 | [LaunchPlay-1.0.0-windows-x64.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64.exe) | ~71 MB | 单文件免安装，双击即用，无需 .NET / 运行库 |
+| **Windows 10/11**（推荐） | x64 | [LaunchPlay-1.0.0-windows-x64-setup.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64-setup.exe) | ~78 MB | **安装版**：装一次到固定目录，之后启动最快；支持「设置 → 关于」里一键检查更新 |
+| **Windows 10/11** | x64 | [LaunchPlay-1.0.0-windows-x64.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64.exe) | ~71 MB | 免安装便携版：单文件双击即用，不用安装，但每次启动都要自解压 |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.AppImage](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.AppImage) | ~110 MB | 通用单文件，`chmod +x` 后直接运行 |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.tar.gz](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.tar.gz) | ~111 MB | 解压即用的绿色目录，AppImage 跑不起来时用它 |
 
 > 全部产物都在 [Releases](https://github.com/Taby-Ding/launchplay/releases/tag/v1.0.0) 页面。
+>
+> **两个 Windows 版本怎么选（启动时间对比）**：
+>
+> | 版本 | 首次安装 | 每次启动 | 应用内更新 | 适合 |
+> | --- | --- | --- | --- | --- |
+> | 安装版 setup.exe | 需安装一次 | **约 2–3 秒** | ✅ 支持 | 长期使用，推荐 |
+> | 便携版 exe | 无需安装 | 约 8–10 秒（每次自解压 70MB + 杀软扫描） | ❌ 需手动下载新版 | 临时用、不想装到系统 |
+>
+> 便携版每次双击都要把整个程序解压到临时目录，慢就慢在这里；安装版装一次后不再解压，所以快很多。
 >
 > Linux AppImage 由 CI 在 Ubuntu runner 上构建（原因见[构建说明](#构建说明)）；Windows 包与 Linux tar.gz 已在本地验证过可运行。
 
@@ -335,8 +347,32 @@ Windows 免安装版是自解压 exe，部分杀软会对这类单文件包误�
 
 本项目没有构建步骤、没有前端框架、没有运行时依赖，改完 `src/renderer/` 直接 `npm start` 就能看到效果。各平台的差异请统一收进 `src/platform.js`，不要在业务代码里散落 `process.platform` 判断。
 
+## 支持作者
+
+如果影游快启帮到了你，欢迎请作者喝杯咖啡 ☕。你的支持是我持续维护更新的动力。
+
+<div align="center">
+  <table style="margin:0 auto;border:none">
+    <tr>
+      <td align="center" style="border:none;padding:0 18px">
+        <img src="docs/alipay-qr.png" alt="支付宝收款码" width="200" />
+        <br/>支付宝
+      </td>
+      <td align="center" style="border:none;padding:0 18px">
+        <img src="docs/wechat-qr.png" alt="微信收款码" width="200" />
+        <br/>微信
+      </td>
+    </tr>
+  </table>
+</div>
+
+> 说明：当前展示的是**占位示意图**（不可扫码）。项目维护者请将自己的真实收款码图片分别覆盖到 [`docs/alipay-qr.png`](docs/alipay-qr.png) 和 [`docs/wechat-qr.png`](docs/wechat-qr.png) 即可生效，README 无需改动。
+
 ## License
 
-[MIT](LICENSE) © LaunchPlay contributors
+本项目采用 **个人/非商业使用免费、商业使用需授权** 的许可协议，详见 [LICENSE](LICENSE)。© 2026 Taby-Ding。
+
+- ✅ **个人、家庭、教育、研究等非商业用途**：免费使用、复制、修改、分发，需保留许可与版权声明。
+- ❌ **商业用途**（公司/组织内使用、作为产品或服务的一部分、对外销售收费等）：须事先取得版权所有者的书面授权。商业授权请通过项目主页联系维护者。
 
 本项目与 Microsoft、Apple、Xbox、Steam 等公司无任何关联，仅作为个人使用的桌面工具。

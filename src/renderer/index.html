@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; img-src 'self' tlapp: data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
-  <title>影音快启 LaunchPlay</title>
+  <title>影游快启</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -15,9 +15,16 @@
   <div class="shell">
     <!-- ======================= 顶部栏 ======================= -->
     <header class="topbar">
-      <div class="clockbox">
-        <div class="clock" id="clock">--:--</div>
-        <div class="date" id="date">&nbsp;</div>
+      <div class="top-left">
+        <div class="brand" id="brand" title="影游快启">
+          <img src="assets/icon.png" alt="影游快启图标" draggable="false" />
+          <span class="brand-name">影游快启</span>
+        </div>
+
+        <div class="clockbox">
+          <div class="clock" id="clock">--:--</div>
+          <div class="date" id="date">&nbsp;</div>
+        </div>
       </div>
 
       <div class="top-actions">
@@ -70,10 +77,10 @@
   </div>
 
   <!-- 手机遥控常驻二维码角标（遥控开启时显示，可拖动，点开看大图） -->
-  <div class="remote-badge hidden" id="remoteBadge" title="手机遥控已开启 · 扫码连接（可拖动）">
+  <div class="remote-badge hidden" id="remoteBadge" title="手机扫码遥控 · 扫码连接（可拖动）">
     <div class="rb-grip" id="rbGrip">⠿</div>
     <div class="rb-qr" id="rbQr"></div>
-    <div class="rb-label">扫码遥控</div>
+    <div class="rb-label">手机扫码遥控</div>
   </div>
 
   <div class="toast-wrap" id="toastWrap"></div>

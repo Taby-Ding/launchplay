@@ -1,21 +1,43 @@
-MIT License
+影音快启 LaunchPlay 许可协议
 
-Copyright (c) 2026 LaunchPlay contributors
+版权所有 (c) 2026 Taby-Ding。保留所有权利。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+本协议对"软件"指本项目的源代码、文档、可执行文件及其任何衍生作品。
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+一、个人 / 非商业使用（免费）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+在同时满足下列全部条件的前提下，任何个人可以免费地获取、使用、
+复制、修改、分发本软件：
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  1. 使用目的仅为个人、家庭、教育、研究或其他非商业目的；
+  2. 不以本软件或基于本软件的作品直接或间接获取商业利益；
+  3. 在任何副本或重要部分中保留本许可协议及版权声明；
+  4. 不将本软件用于任何违反适用法律的场景。
+
+在此范围内，特此授予免费、非独占、不可再许可的授权。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+二、商业使用（需单独授权）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"商业使用"包括但不限于：将本软件用于公司、组织或任何以营利为目的
+的环境；作为产品或服务的一部分对外提供；集成进商用软硬件；对外销售、
+分发并收费；以及任何不符合第一条第 1、2 项的场景。
+
+商业使用必须先取得版权所有者的书面授权（可邮件联系项目维护者）。
+未经授权的商业使用不被允许。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+三、免责声明
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+本软件按"原样"提供，不附带任何明示或暗示的保证，包括但不限于
+适销性、特定用途适用性及不侵权的保证。在任何情况下，版权所有者
+或贡献者均不对因使用本软件或与之相关的任何索赔、损害或其他责任
+承担责任，无论其基于合同、侵权或其他法律依据。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+四、其他
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+本软件与 Microsoft、Apple、Xbox、Steam 等公司无任何关联。
+商业化授权咨询请通过项目主页（https://github.com/Taby-Ding/launchplay）
+联系维护者。

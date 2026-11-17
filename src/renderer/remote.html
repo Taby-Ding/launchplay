@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0b1020" />
-  <title>影音快启 · 手机遥控</title>
+  <title>影游快启 · 手机遥控</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     :root {
@@ -39,6 +39,7 @@
       border-radius: 18px; padding: 14px;
     }
     .card-title { font-size: 12px; color: var(--muted); margin: 0 0 10px 4px; }
+    .card-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 10px 2px 0; opacity: .85; }
 
     /* 方向键 + 确定 */
     .dpad {
@@ -77,7 +78,7 @@
 
     /* 触摸板 */
     .touchpad {
-      position: relative; height: 150px; border-radius: 16px;
+      position: relative; height: 210px; border-radius: 18px;
       background: radial-gradient(ellipse at 50% 45%, var(--surface-2), var(--bg));
       border: 1px dashed var(--line); overflow: hidden;
       touch-action: none; -webkit-user-select: none; user-select: none;
@@ -141,13 +142,13 @@
 <body>
   <div class="wrap">
     <header>
-      <div class="brand">影音快启 <small>手机遥控</small></div>
+      <div class="brand">影游快启 <small>手机遥控</small></div>
       <div id="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></div>
     </header>
 
     <div class="err-banner" id="errBanner"></div>
 
-    <div class="card">
+    <div class="card" id="cardNav">
       <p class="card-title">导航</p>
       <div class="dpad">
         <div class="key k-up" data-action="up" role="button" aria-label="上"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></div>
@@ -180,7 +181,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="cardPlay">
       <p class="card-title">播放遥控 · 直接控制正在看的视频（爱奇艺 / 腾讯视频等）</p>
       <div class="row four">
         <div class="btn" data-action="rew" role="button"><svg viewBox="0 0 24 24"><path d="M11 6L5 12l6 6M19 6l-6 6 6 6"/></svg>快退</div>
@@ -188,10 +189,13 @@
         <div class="btn" data-action="ffwd" role="button"><svg viewBox="0 0 24 24"><path d="M13 6l6 6-6 6M5 6l6 6-6 6"/></svg>快进</div>
         <div class="btn" data-action="fullscreen" role="button"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>全屏</div>
       </div>
-      <div class="row two" style="margin-top:8px">
-        <div class="btn" data-hint="updown" role="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M8 9l4-4 4 4"/></svg>音量：用上方 ▲▼</div>
-        <div class="btn" data-hint="nav" role="button"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg>方向键自动跟随</div>
+      <div class="row four" style="margin-top:8px">
+        <div class="btn" data-action="voldown" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>音量−</div>
+        <div class="btn" data-action="volup" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>音量+</div>
+        <div class="btn" data-action="mute" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>静音</div>
+        <div class="btn" data-action="nextep" role="button"><svg viewBox="0 0 24 24"><path d="M5 5l10 7-10 7z"/><path d="M19 5v14"/></svg>下一集</div>
       </div>
+      <p class="card-note">小提示：看视频时上方导航区的 ▲ ▼ ◀ ▶ 会自动变成音量 / 快退快进（启动台收起时生效），无需再切换。</p>
     </div>
 
     <div class="card">
@@ -313,21 +317,30 @@
         }).finally(function () { busy = false; });
       }
 
-      // 鼠标移动是高频操作：绕过 busy 锁，独立节流发送，避免被丢弃
-      var moveBusy = false;
-      var lastMoveAt = 0;
-      function sendMove(dx, dy) {
-        if (!token) return;
-        var now = Date.now();
-        if (now - lastMoveAt < 24 || moveBusy) return; // ~40fps 上限
-        lastMoveAt = now;
-        moveBusy = true;
+      // 鼠标移动：把位移累积起来按固定节拍冲刷，既不丢帧也不发爆请求。
+      // 之前是"超时/busy 就直接丢弃"，快速滑动时大部分位移被丢掉，所以显得很慢。
+      var movePendingX = 0, movePendingY = 0;
+      var moveInFlight = false;
+      var MOVE_INTERVAL = 16; // ~60fps 冲刷一次
+      function flushMove() {
+        if (moveInFlight || !token) return;
+        var dx = Math.max(-800, Math.min(800, Math.round(movePendingX)));
+        var dy = Math.max(-800, Math.min(800, Math.round(movePendingY)));
+        movePendingX = 0; movePendingY = 0;
+        if (!dx && !dy) return;
+        moveInFlight = true;
         fetch('/cmd', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ t: token, action: 'mmove', dx: dx, dy: dy })
-        }).catch(function () {}).finally(function () { moveBusy = false; });
+        }).catch(function () {}).finally(function () { moveInFlight = false; });
       }
+      function sendMove(dx, dy) {
+        if (!token) return;
+        movePendingX += dx; movePendingY += dy;
+        flushMove();
+      }
+      setInterval(flushMove, MOVE_INTERVAL);
 
       // 普通按键：立即发送
       document.querySelectorAll('[data-action]').forEach(function (el) {
@@ -391,22 +404,6 @@
         if (e.key === 'Enter') { e.preventDefault(); submitText(); }
       });
 
-      // 提示性按钮（不发送指令）
-      document.querySelectorAll('[data-hint]').forEach(function (el) {
-        el.addEventListener('click', function () {
-          var h = el.getAttribute('data-hint');
-          toastLocal(h === 'updown'
-            ? '看视频时，上方导航区的 ▲ ▼ 就是音量 + / −'
-            : '启动台隐藏时，方向键自动变成音量 / 快进快退，确定键变成播放暂停');
-        });
-      });
-      var localToastTimer = null;
-      function toastLocal(text) {
-        statusText.textContent = text;
-        clearTimeout(localToastTimer);
-        localToastTimer = setTimeout(function () { setStatus(failCount ? 'err' : 'on', failCount ? '未连接' : '已连接 · 就绪'); }, 2600);
-      }
-
       // 触摸板：滑动=移动光标，轻点=左键，长按=右键
       (function () {
         var pad = document.getElementById('touchpad');
@@ -417,7 +414,7 @@
         var longPressTimer = null;
         var didMove = false;
         var didLongPress = false;
-        var SENS = 1.8; // 手指位移 -> 屏幕上鼠标位移的放大系数
+        var SENS = 2.6; // 手指位移 -> 屏幕上鼠标位移的放大系数（调大后滑动更跟手）
 
         function pointerDown(e) {
           if (activeId !== null) return;
@@ -468,15 +465,45 @@
         pad.addEventListener('pointercancel', pointerUp);
       })();
 
-      // 进来先探测一次；之后每 15 秒探测，电脑关掉服务后手机能感知
+      // 自动把对应卡片滚到最上方（第一次只记录基线，不滚动）：
+      //   · launchSeq 变大（打开程序）      -> 播放遥控卡片
+      //   · front 由 false 变 true（启动台回到最上层） -> 导航卡片
+      var lastLaunchSeq = null;
+      var lastFront = null;
+      function scrollCardToTop(id) {
+        var card = document.getElementById(id);
+        if (!card || !card.scrollIntoView) return;
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        catch (e) { card.scrollIntoView(true); }
+        buzz();
+      }
       function ping() {
         fetch('/ping').then(function (r) {
-          if (r.ok && !failCount) setStatus('on', '已连接 · 就绪');
+          if (!r.ok) return;
+          if (!failCount) setStatus('on', '已连接 · 就绪');
+          return r.json().catch(function () { return null; });
+        }).then(function (j) {
+          if (!j) return;
+          // 先处理"打开程序 -> 播放遥控"
+          if (typeof j.launchSeq === 'number') {
+            if (lastLaunchSeq === null) lastLaunchSeq = j.launchSeq;
+            else if (j.launchSeq > lastLaunchSeq) { lastLaunchSeq = j.launchSeq; scrollCardToTop('cardPlay'); }
+            else if (j.launchSeq < lastLaunchSeq) { lastLaunchSeq = j.launchSeq; } // 服务重启后归零
+          }
+          // 再处理"启动台回到最上层 -> 导航"：放在后面，若同一拍两者都变，以导航为准
+          if (typeof j.front === 'boolean') {
+            if (lastFront === null) lastFront = j.front;
+            else {
+              if (j.front && !lastFront) scrollCardToTop('cardNav');
+              lastFront = j.front;
+            }
+          }
         }).catch(function () { setStatus('err', '未连接'); });
       }
       if (!token) showError('网址缺少配对码，请重新扫描电脑上的二维码。');
       else ping();
-      setInterval(ping, 15000);
+      // 2.5 秒一次：既能在打开程序后较快跳到播放遥控，又不会占用多少带宽（一次几十字节）
+      setInterval(ping, 2500);
     })();
   </script>
 </body>

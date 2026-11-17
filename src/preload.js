@@ -32,12 +32,26 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.invoke('win:minimize'),
   quit: () => ipcRenderer.invoke('win:quit'),
   openPath: (p) => ipcRenderer.invoke('os:open-path', p),
+  setTaskbar: (on) => ipcRenderer.invoke('taskbar:set', on),
+
+  // 应用内更新（安装版）
+  updateCapability: () => ipcRenderer.invoke('update:capability'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  updateOpenRelease: () => ipcRenderer.invoke('update:open-release'),
+  // 更新事件只服务于"关于"面板：先清掉旧的，避免重复打开弹窗时监听器累积
+  onUpdateEvent: (cb) => {
+    ipcRenderer.removeAllListeners('update:event');
+    ipcRenderer.on('update:event', (_e, payload) => cb(payload));
+  },
 
   // 手机遥控
   remoteStart: () => ipcRenderer.invoke('remote:start'),
   remoteStop: () => ipcRenderer.invoke('remote:stop'),
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
   remoteRotate: () => ipcRenderer.invoke('remote:rotate'),
+  onRemoteStarted: (cb) => ipcRenderer.on('remote:started', (_e, info) => cb(info)),
   onRemoteNav: (cb) => ipcRenderer.on('remote:nav', (_e, action) => cb(action)),
   onRemotePower: (cb) => ipcRenderer.on('remote:power', (_e, action) => cb(action)),
   onRemoteToast: (cb) => ipcRenderer.on('remote:toast', (_e, text) => cb(text)),

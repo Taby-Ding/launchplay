@@ -34,7 +34,7 @@ const VK = {
   up: 0x26, down: 0x28, left: 0x25, right: 0x27,
   space: 0x20, enter: 0x0D, esc: 0x1B, tab: 0x09,
   backspace: 0x08, del: 0x2E,
-  f: 0x46, f11: 0x7A,
+  f: 0x46, f4: 0x73, f11: 0x7A,
   volup: 0xAF, voldown: 0xAE, mute: 0xAD,
   next: 0xB0, prev: 0xB1, play: 0xB3,
   ctrl: 0x11, shift: 0x10, alt: 0x12,
@@ -98,6 +98,21 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
         $vk = [byte]$o.vk
         [LPInputNative]::keybd_event($vk, 0, 0, [UIntPtr]::Zero)
         [LPInputNative]::keybd_event($vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero)
+      }
+      'combo' {
+        # 组合键：如 Alt+Enter(全屏)、Ctrl+→(下一集)、Alt+F4(关闭窗口)
+        # 先依次按下所有修饰键，短暂停顿后逆序抬起
+        $vks = @($o.vks)
+        foreach ($vk in $vks) {
+          [LPInputNative]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero)
+          Start-Sleep -Milliseconds 20
+        }
+        Start-Sleep -Milliseconds 40
+        [array]::Reverse($vks)
+        foreach ($vk in $vks) {
+          [LPInputNative]::keybd_event([byte]$vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero)
+          Start-Sleep -Milliseconds 20
+        }
       }
       'keydown' { [LPInputNative]::keybd_event([byte]$o.vk, 0, 0, [UIntPtr]::Zero) }
       'keyup'   { [LPInputNative]::keybd_event([byte]$o.vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero) }
@@ -253,6 +268,8 @@ class WinInputDriver {
 
   // 便捷方法
   key(vk) { return this.exec({ cmd: 'key', vk }); }
+  /** 组合键：combo([VK.ctrl, VK.right]) = Ctrl+→ */
+  combo(vks) { return this.exec({ cmd: 'combo', vks: (Array.isArray(vks) ? vks : []).slice(0, 4) }); }
   keydown(vk) { return this.exec({ cmd: 'keydown', vk }); }
   keyup(vk) { return this.exec({ cmd: 'keyup', vk }); }
   type(text) {

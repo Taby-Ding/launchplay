@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_SETTINGS = {
-  autostart: false,
+  autostart: true,
   fullscreen: true,
   sound: true,
   clock24h: true,
@@ -17,6 +17,11 @@ const DEFAULT_SETTINGS = {
   hideHints: false,
   hideAfterLaunch: false, // 启动应用后是否收起启动台(默认不收起, 留在应用下层)
   boostLaunch: true,      // 让新窗口铺满屏幕并置顶
+  // 手机遥控：默认开启，每次启动软件自动开启服务并在角落常驻二维码
+  remoteAlwaysOn: true,
+  autoHideTaskbar: true,  // 默认开启：启动台运行时隐藏 Windows 任务栏, 退出后还原
+  // 字号缩放系数：1.3 = 默认(即原"更大"档的字号), 见 style.css 的 --fs 与 app.js 的 FONT_SCALES
+  fontScale: 1.3,
   // 背景: 'default' = 随程序附带的电视背景图, '' = 纯深色渐变,
   //       其它值为 backgrounds 目录下的自定义图片文件名
   background: { file: 'default', dim: 0.25, blur: false },
@@ -25,7 +30,10 @@ const DEFAULT_SETTINGS = {
 // 配置文件版本: 用于一次性迁移
 //   1 -> 2 : 启动后不再默认收起启动台, 改为留在新窗口下层
 //   2 -> 3 : 内置电视背景图成为默认背景
-const SCHEMA_VERSION = 3;
+//   3 -> 4 : 二维码常驻与任务栏自动隐藏改为默认开启；引入字号缩放
+//   4 -> 5 : 字号默认档从 1 提升到 1.3（原"更大"档成为新的"标准"）
+//   5 -> 6 : 开机自启改为默认开启
+const SCHEMA_VERSION = 6;
 
 class Store {
   constructor(dir) {
@@ -67,6 +75,31 @@ class Store {
       const bg = this.data.settings.background || {};
       if (!bg.file) this.data.settings.background = { file: 'default', dim: 0.25, blur: false };
       this.data.version = 3;
+      this.save();
+    }
+    if (this.data.version < 4) {
+      // v3 及以前二维码/任务栏是可选开关(旧默认 false), 4.0 起默认开启。
+      // 旧配置里的 false 是"旧默认"而非用户主动选择 —— 统一升级为开启。
+      const s = this.data.settings;
+      s.remoteAlwaysOn = true;
+      s.autoHideTaskbar = true;
+      if (typeof s.fontScale !== 'number') s.fontScale = 1;
+      this.data.version = 4;
+      this.save();
+    }
+    if (this.data.version < 5) {
+      // 字号默认档从 1 提到 1.3(原"更大")。只有仍停留在旧默认值 1 的才提升,
+      // 用户主动调过的其它值(1.15/1.3/1.5...)保持尊重, 不覆盖其选择。
+      const s = this.data.settings;
+      if (s.fontScale === 1) s.fontScale = 1.3;
+      this.data.version = 5;
+      this.save();
+    }
+    if (this.data.version < 6) {
+      // 开机自启改为默认开启。与二维码/任务栏一致: 旧 false 是旧默认而非用户主动关闭,
+      // 统一升级为开启。以后用户仍可在设置里手动关掉。
+      this.data.settings.autostart = true;
+      this.data.version = 6;
       this.save();
     }
   }

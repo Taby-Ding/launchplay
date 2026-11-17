@@ -21,7 +21,7 @@ const ctx = {
   exePath: '',   // 当前可执行文件（便携 exe / AppImage / 二进制）
   appPath: '',   // macOS 的 .app 包路径
   appId: 'com.launchplay.desktop',
-  displayName: '影音快启 LaunchPlay',
+  displayName: '影游快启',
 };
 
 function init(o) {

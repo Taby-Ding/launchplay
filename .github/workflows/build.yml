@@ -52,11 +52,20 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libfuse2
 
-      - name: Build Windows
+      - name: Build Windows (portable)
         if: runner.os == 'Windows'
         run: npm run dist:win
         env:
           # 本项目不做代码签名，别让 electron-builder 自动去翻系统证书
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # 安装版是应用内更新的载体：electron-builder 会同时产出 latest.yml，
+      # 手机/应用内 electron-updater 靠它判断新版本。只有打 tag 时才需要，
+      # 平时 main 分支构建跳过，省时间。
+      - name: Build Windows (NSIS installer + latest.yml)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        run: npm run dist:win:setup
+        env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       # tar.gz 是稳定产物，先单独构建；AppImage 万一失败也不能拖累它
@@ -83,6 +92,7 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.tar.gz
+            release/latest.yml
           retention-days: 14
           if-no-files-found: error
 

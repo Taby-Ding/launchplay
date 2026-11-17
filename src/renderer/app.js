@@ -1,7 +1,7 @@
 'use strict';
 (function () {
 /* =========================================================
-   LaunchPlay 影音快启 渲染进程
+   LaunchPlay 影游快启 渲染进程
    - 空间导航焦点系统(方向键/遥控器/手柄通用)
    - 磁贴渲染、启动、添加/编辑/移除
    - 设置、电源确认、开机自启
@@ -330,9 +330,21 @@ function applyBackground() {
   document.documentElement.style.setProperty('--bg-dim', String(bg.dim));
 }
 
+// 字号档位: 系数 -> 显示名。1 保持当前默认, 其余整体放大界面文字
+// 字号档位：以原"更大"(1.3) 作为新的"标准"默认档，其余档位在此基础上递进
+const FONT_SCALES = [
+  { v: 1.3, label: '标准' },
+  { v: 1.45, label: '大' },
+  { v: 1.6, label: '更大' },
+  { v: 1.8, label: '最大' },
+];
+
 function applySettings() {
   const s = state.settings;
   document.documentElement.dataset.size = s.tileSize || 'normal';
+  // 字号: 写入根变量, style.css 里所有 font-size 都乘了它
+  const fs = typeof s.fontScale === 'number' && s.fontScale > 0 ? s.fontScale : 1;
+  document.documentElement.style.setProperty('--fs', String(fs));
   $('#hintbar').classList.toggle('hide', !!s.hideHints);
   state.isFullscreen = s.fullscreen !== false;
   applyBackground();
@@ -953,6 +965,19 @@ async function openSettings() {
         </div>
         <div class="switch ${s.fullscreen !== false ? 'on' : ''}"></div>
       </div>
+      ${PLAT.caps.autoHideTaskbar ? `<div class="setting" data-focusable data-toggle="autoHideTaskbar">
+        <div class="setting-text">
+          <div class="setting-name">自动隐藏任务栏</div>
+          <div class="setting-desc">启动台运行时隐藏 Windows 任务栏，退出后自动还原</div>
+        </div>
+        <div class="switch ${s.autoHideTaskbar ? 'on' : ''}"></div>
+      </div>` : `<div class="setting" data-focusable style="opacity:.55">
+        <div class="setting-text">
+          <div class="setting-name">自动隐藏任务栏</div>
+          <div class="setting-desc">仅 Windows 支持，macOS / Linux 没有可自动隐藏的任务栏</div>
+        </div>
+        <div class="badge">Windows</div>
+      </div>`}
       <div class="setting" data-focusable data-toggle="hideAfterLaunch">
         <div class="setting-text">
           <div class="setting-name">启动后收起启动台</div>
@@ -988,6 +1013,13 @@ async function openSettings() {
         <div class="switch ${s.hideHints ? 'on' : ''}"></div>
       </div>
       <div class="section-label" style="margin-top:14px;padding-left:14px">外观</div>
+      <div class="setting" data-focusable data-cycle="fontScale">
+        <div class="setting-text">
+          <div class="setting-name">字号大小</div>
+          <div class="setting-desc">整体放大界面文字，看得更清楚（点击循环切换）</div>
+        </div>
+        <div class="badge" id="fontScaleBadge">${(FONT_SCALES.find((f) => Math.abs(f.v - (typeof s.fontScale === 'number' ? s.fontScale : 1)) < 0.001) || FONT_SCALES[0]).label}</div>
+      </div>
       <div class="setting" data-focusable data-cycle="tileSize">
         <div class="setting-text">
           <div class="setting-name">图标尺寸</div>
@@ -1034,6 +1066,20 @@ async function openSettings() {
       </div>
 
       <div class="section-label" style="margin-top:14px;padding-left:14px">其它</div>
+      <div class="setting" data-focusable data-action="support">
+        <div class="setting-text">
+          <div class="setting-name">感谢使用，欢迎支持 ⭐</div>
+          <div class="setting-desc">喜欢影游快启？去项目主页点个 Star 或请作者喝杯咖啡</div>
+        </div>
+        <div class="badge">打开</div>
+      </div>
+      <div class="setting" data-focusable data-action="about">
+        <div class="setting-text">
+          <div class="setting-name">关于 / 检查更新</div>
+          <div class="setting-desc">查看版本信息，检查是否有新版本</div>
+        </div>
+        <div class="badge">查看</div>
+      </div>
       <div class="setting" data-focusable data-action="dataDir">
         <div class="setting-text">
           <div class="setting-name">数据目录</div>
@@ -1121,6 +1167,15 @@ async function toggleSetting(key, row) {
     await api.setFullscreen(next);
     state.isFullscreen = next;
     confirmSound();
+  } else if (key === 'autoHideTaskbar') {
+    const r = await api.setTaskbar(next);
+    if (!r || r.ok === false) {
+      toast('设置任务栏失败：' + ((r && r.error) || '未知错误'), 'err', 3200);
+      return;
+    }
+    state.settings.autoHideTaskbar = next;
+    if (r.skipped) toast(r.reason || '任务栏已处于自动隐藏，已跳过', 'ok', 2600);
+    confirmSound();
   } else {
     state.settings[key] = next;
     confirmSound();
@@ -1137,6 +1192,20 @@ async function toggleSetting(key, row) {
 /** 循环切换类设置: 图标尺寸 / 背景暗度 */
 function cycleSetting(row) {
   const key = row.dataset.cycle;
+
+  if (key === 'fontScale') {
+    const cur = typeof state.settings.fontScale === 'number' ? state.settings.fontScale : 1;
+    let idx = FONT_SCALES.findIndex((f) => Math.abs(f.v - cur) < 0.001);
+    if (idx < 0) idx = 0;
+    const next = FONT_SCALES[(idx + 1) % FONT_SCALES.length];
+    state.settings.fontScale = next.v;
+    applySettings();
+    const badge = $('#fontScaleBadge');
+    if (badge) badge.textContent = next.label;
+    persist();
+    confirmSound();
+    return;
+  }
 
   if (key === 'bgDim') {
     const bg = bgSettings();
@@ -1209,6 +1278,11 @@ async function runSettingAction(action) {
   if (action === 'clearBg') { await clearBackground(); return; }
   if (action === 'dataDir') { api.openPath(state.dataDir); return; }
   if (action === 'help') { openHelp(); return; }
+  if (action === 'support') {
+    api.openPath('https://github.com/Taby-Ding/launchplay#支持作者');
+    return;
+  }
+  if (action === 'about') { await openAbout(); return; }
   if (action === 'phoneRemote') { await openPhoneRemote(); return; }
   if (action === 'quit') { await persist(); api.quit(); }
 }
@@ -1248,7 +1322,7 @@ function hideRemoteBadge() {
 function placeBadge(x, y) {
   const badge = $('#remoteBadge');
   if (!badge) return;
-  const w = badge.offsetWidth || 104, h = badge.offsetHeight || 130;
+  const w = badge.offsetWidth || 150, h = badge.offsetHeight || 176;
   const maxX = Math.max(8, window.innerWidth - w - 8);
   const maxY = Math.max(8, window.innerHeight - h - 8);
   badge.style.left = Math.max(8, Math.min(maxX, x)) + 'px';
@@ -1320,6 +1394,11 @@ async function openPhoneRemote(rotate) {
     toast('遥控服务开启失败：' + ((info && info.error) || '未知错误'), 'err', 4000);
     return;
   }
+  // 记住"常驻"：以后每次启动软件自动开启服务并在角落显示二维码
+  if (state.settings.remoteAlwaysOn !== true) {
+    state.settings.remoteAlwaysOn = true;
+    api.saveState({ settings: { remoteAlwaysOn: true } }).catch(() => {});
+  }
   showRemoteBadge(info); // 大屏角落常驻二维码
 
   openModal(`
@@ -1364,6 +1443,11 @@ async function openPhoneRemote(rotate) {
     if (b.dataset.rAction === 'rotate') { await openPhoneRemote(true); return; }
     if (b.dataset.rAction === 'stop') {
       await api.remoteStop();
+      // 主动停止：取消常驻，下次启动不再自动开启
+      if (state.settings.remoteAlwaysOn !== false) {
+        state.settings.remoteAlwaysOn = false;
+        api.saveState({ settings: { remoteAlwaysOn: false } }).catch(() => {});
+      }
       hideRemoteBadge();
       closeModal();
       toast('手机遥控已停止', 'ok', 1800);
@@ -1406,6 +1490,118 @@ function openHelp() {
     </div>
   `, { narrow: true, autofocus: '.m-foot .btn-primary' });
   bindClose();
+}
+
+/* ---- 关于 / 检查更新 ---- */
+async function openAbout() {
+  const ver = state.version || '1.0.0';
+  let cap = { canUpdate: false, releaseUrl: 'https://github.com/Taby-Ding/launchplay/releases/latest' };
+  try { if (api.updateCapability) cap = await api.updateCapability() || cap; } catch {}
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">关于 影游快启</div>
+        <div class="m-sub">把电脑变成电视式全屏启动器</div>
+      </div>
+      <button class="btn btn-icon-only" data-close data-focusable title="关闭">✕</button>
+    </div>
+    <div class="m-body" style="text-align:center">
+      <div style="width:76px;height:76px;border-radius:20px;margin:6px auto 14px;
+                  background:linear-gradient(145deg,#6d8bff,#8a6dff);
+                  box-shadow:0 10px 30px rgba(109,139,255,.4);display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:#fff;margin-left:3px"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <div style="font-size:calc(20px * var(--fs,1));font-weight:700;letter-spacing:1px">影游快启</div>
+      <div style="font-size:calc(12px * var(--fs,1));color:var(--txt-dim);margin-top:6px">当前版本 v${esc(ver)}</div>
+
+      <div id="updStatus" style="margin:20px auto 10px;min-height:40px;font-size:calc(13px * var(--fs,1));color:var(--txt-dim);line-height:1.6">
+        ${cap.canUpdate ? '点击下方按钮检查是否有新版本。' : '当前是免安装版，不支持应用内自动更新。可前往项目主页下载最新版。'}
+      </div>
+      <div id="updBarWrap" style="display:none;width:80%;height:8px;border-radius:8px;background:rgba(255,255,255,.1);margin:6px auto;overflow:hidden">
+        <div id="updBar" style="height:100%;width:0%;border-radius:8px;background:linear-gradient(90deg,#6d8bff,#b18cff);transition:width .2s"></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap">
+        ${cap.canUpdate ? `<button class="btn btn-primary" id="btnCheckUpdate" data-focusable>检查更新</button>` : ''}
+        <button class="btn" id="btnReleasePage" data-focusable>${cap.canUpdate ? '前往下载页' : '打开下载页'}</button>
+      </div>
+      <div style="margin-top:22px;font-size:calc(11px * var(--fs,1));color:var(--txt-faint);line-height:1.7">
+        个人 / 非商业使用免费 · 商业使用需授权<br/>© 2026 Taby-Ding
+      </div>
+    </div>
+    <div class="m-foot">
+      <div class="foot-hint"><span>版本 v${esc(ver)}</span></div>
+      <button class="btn" data-close data-focusable>关闭</button>
+    </div>
+  `, { narrow: true, autofocus: cap.canUpdate ? '#btnCheckUpdate' : '#btnReleasePage' });
+  bindClose();
+
+  const $status = $('#updStatus');
+  const $barWrap = $('#updBarWrap');
+  const $bar = $('#updBar');
+  const $check = $('#btnCheckUpdate');
+  if ($('#btnReleasePage')) {
+    $('#btnReleasePage').addEventListener('click', () => { if (api.updateOpenRelease) api.updateOpenRelease(); });
+  }
+
+  // 监听主进程推送的更新进度（preload 端保证只保留一个监听器）
+  if (api.onUpdateEvent) {
+    api.onUpdateEvent((p) => {
+      if (!p || !$status) return;
+      const t = p.type;
+      if (t === 'checking') { $status.textContent = '正在检查新版本…'; setBar(null); }
+      else if (t === 'available') {
+        $status.innerHTML = `发现新版本 <b>v${esc(p.version || '')}</b>，正在准备下载…`;
+        // available 后自动下载，进度由后续事件驱动
+        if (api.updateDownload) api.updateDownload();
+      }
+      else if (t === 'not-available') { $status.textContent = `已是最新版本${p.version ? '（v' + esc(p.version) + '）' : ''}。`; setBar(null); }
+      else if (t === 'progress') { $status.textContent = `正在下载更新… ${p.percent}%`; setBar(p.percent); }
+      else if (t === 'downloaded') {
+        $status.textContent = `新版本已下载完成，是否立即安装并重启？`;
+        setBar(100);
+        if ($check) {
+          $check.textContent = '安装并重启';
+          $check.disabled = false;
+          $check.dataset.mode = 'install';
+        }
+      }
+      else if (t === 'error') { $status.textContent = '更新出错：' + (p.message || '未知错误'); setBar(null); if ($check) $check.disabled = false; }
+    });
+  }
+  function setBar(pct) {
+    if (!$barWrap || !$bar) return;
+    if (pct === null || pct === undefined) { $barWrap.style.display = 'none'; return; }
+    $barWrap.style.display = '';
+    $bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+
+  if ($check) {
+    $check.addEventListener('click', async () => {
+      if ($check.dataset.mode === 'install') {
+        $check.disabled = true;
+        $status.textContent = '正在安装，即将重启…';
+        if (api.updateInstall) api.updateInstall();
+        return;
+      }
+      $check.disabled = true;
+      $status.textContent = '正在检查新版本…';
+      try {
+        const r = await api.updateCheck();
+        if (r && r.portable) {
+          $status.textContent = '免安装版不支持应用内更新，请打开下载页获取最新版。';
+          $check.disabled = false;
+        } else if (r && r.ok === false) {
+          $status.textContent = '检查失败：' + (r.error || '未知错误');
+          $check.disabled = false;
+        }
+        // 成功时状态由 onUpdateEvent 事件驱动（available / not-available）
+      } catch (e) {
+        $status.textContent = '检查失败：' + (e && e.message || e);
+        $check.disabled = false;
+      }
+    });
+  }
 }
 
 /* =========================================================
@@ -1816,6 +2012,10 @@ async function repairIcons() {
       if (st && st.running) showRemoteBadge(st);
       else hideRemoteBadge();
     }).catch(() => {});
+  }
+  // 开机自动开启遥控时, 主进程在服务起来后会推送一次, 这里补上常驻角标
+  if (api && api.onRemoteStarted) {
+    api.onRemoteStarted((info) => { if (info && info.running) showRemoteBadge(info); });
   }
 
   // 图标自愈(异步, 不阻塞首屏)

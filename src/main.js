@@ -21,6 +21,8 @@ const { launchItem } = require('./launch');
 const { media } = require('./media');
 const { winInput, VK } = require('./wininput');
 const { RemoteService } = require('./remote');
+const taskbar = require('./taskbar');
+const updater = require('./updater');
 
 const isDev = !app.isPackaged;
 const CAPTURE = process.env.TL_CAPTURE || '';
@@ -109,6 +111,11 @@ const BG_DIR = path.join(DATA_DIR, 'backgrounds');
 let store = null;
 let icons = null;
 let win = null;
+let splash = null;        // 启动画面(先显示, 主窗口就绪后关闭)
+const SPLASH_MIN_MS = 1400; // splash 至少显示这么久: 安装版太快也要看清 logo, 便携版够盖住白框
+let splashShownAt = 0;    // splash 真正"渲染完成并显示"的时刻(不是创建时刻)
+let splashPainted = false; // splash 内容是否已 did-finish-load(避免白框)
+let mainReady = false;     // 主窗口是否已 ready-to-show
 let hotkeyOk = false;   // 唤回热键是否注册成功(没注册成功就不自动收起, 免得回不来)
 let remote = null;      // 手机遥控服务(默认关闭, 设置里点开启才启动)
 let lastLaunchedPid = 0; // 最近一次由启动台打开的程序 pid, 供手机"关闭程序"使用
@@ -210,6 +217,77 @@ function appIconPath() {
   return undefined;
 }
 
+/* ------------------------- 启动画面 ------------------------- */
+/**
+ * app.ready 前不能建窗口, 所以当 ready 一触发就先显示这个轻量 splash,
+ * 把"读取配置/初始化/主窗口加载"这段等待用画面盖住, 让用户知道程序正在启动。
+ * 截图采集模式(TL_CAPTURE)下跳过, 避免干扰自动化截图。
+ */
+function createSplash() {
+  if (splash || CAPTURE) return;
+  splashPainted = false;
+  mainReady = false;
+  splashShownAt = Date.now();
+  splash = new BrowserWindow({
+    width: 480,
+    height: 320,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    center: true,
+    show: false, // 关键: 先不显示, 等内容真正渲染完再 show, 否则用户先看到白框
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: '#05070f',
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  // 内容首次渲染完成才显示 —— 便携版解压慢, 这一步能杜绝"白框一闪"
+  splash.webContents.once('did-finish-load', () => {
+    splashPainted = true;
+    splashShownAt = Date.now();
+    if (splash && !splash.isDestroyed() && !splash.isVisible()) splash.show();
+    maybeCloseSplash();
+  });
+  // 兜底: 极端情况下 load 事件没来, 2 秒后也强制显示, 不能让 splash 卡住主窗口
+  setTimeout(() => {
+    if (splash && !splash.isDestroyed() && !splash.isVisible()) {
+      splashPainted = true;
+      splashShownAt = Date.now();
+      splash.show();
+      maybeCloseSplash();
+    }
+  }, 2000);
+  splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+  splash.on('closed', () => { splash = null; });
+}
+
+/** 主窗口已就绪, 记下标记, 由 maybeCloseSplash 统一决定何时关 */
+function mainWindowReady() {
+  mainReady = true;
+  maybeCloseSplash();
+}
+
+/**
+ * 关闭 splash 的唯一入口。必须同时满足:
+ *   1) splash 内容已真正渲染(painted) —— 否则会看到白框
+ *   2) 主窗口已 ready —— 否则关早了会露出桌面
+ * 两者都满足后再保证最短展示 SPLASH_MIN_MS, 从"真正显示"的时刻算起。
+ * 这样便携版(慢)不会白框, 安装版(快)也会稳定展示约 1.4 秒。
+ */
+function maybeCloseSplash() {
+  if (!splashPainted || !mainReady) return;
+  if (!splash || splash.isDestroyed()) { splash = null; return; }
+  if (splash._closeTimer) return; // 已排过队, 不要重复
+  const elapsed = Date.now() - splashShownAt;
+  const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
+  splash._closeTimer = setTimeout(() => {
+    if (splash && !splash.isDestroyed()) splash.close();
+    splash = null;
+  }, wait);
+}
+
 function createWindow() {
   const fullscreen = store.settings.fullscreen !== false;
 
@@ -223,7 +301,7 @@ function createWindow() {
     fullscreen,
     autoHideMenuBar: true,
     backgroundColor: '#05070c',
-    title: '影音快启 LaunchPlay',
+    title: '影游快启',
     icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -261,6 +339,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.show();
     if (store.settings.fullscreen !== false) win.setFullScreen(true);
+    mainWindowReady();
   });
 
   // 外部链接不在应用内打开
@@ -341,7 +420,7 @@ function setupAutostartContext() {
   autostart.init({
     exePath: LINUX && process.env.APPIMAGE ? process.env.APPIMAGE : exePath,
     appPath,
-    displayName: '影音快启 LaunchPlay',
+    displayName: '影游快启',
   });
 }
 
@@ -361,6 +440,11 @@ function afterLaunch(pid) {
   // 记下最近启动的程序, 手机遥控的"关闭程序"就关它
   // (pid 为 0 表示系统方式打开、拿不到句柄, 这时关闭会给出提示)
   lastLaunchedPid = pid || 0;
+
+  // 通知手机遥控页: 有新程序被打开, 自动把"播放遥控"卡片滚动到最上方
+  if (remote && remote.running) {
+    try { remote.notifyLaunch(); } catch { /* ignore */ }
+  }
 
   if (win && !win.isDestroyed()) {
     if (s.hideAfterLaunch === true) {
@@ -426,6 +510,11 @@ function stateSnapshot() {
 }
 
 function setupIpc() {
+  // 更新进度事件转发给渲染层"关于"面板
+  updater.setSink((payload) => {
+    if (win && !win.isDestroyed()) win.webContents.send('update:event', payload);
+  });
+
   ipcMain.handle('state:get', () => stateSnapshot());
 
   ipcMain.handle('state:save', (_e, patch) => {
@@ -576,14 +665,26 @@ function setupIpc() {
     else shell.openPath(p);
   });
 
+  // 任务栏自动隐藏: 开=托管并隐藏, 关=还原用户原状态
+  ipcMain.handle('taskbar:set', async (_e, on) => {
+    try {
+      return on ? await taskbar.enable(DATA_DIR) : await taskbar.restore(DATA_DIR, false);
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || '设置失败' };
+    }
+  });
+
+  /* ---- 应用内更新（安装版） ---- */
+  ipcMain.handle('update:capability', () => updater.capability(app, shell));
+  ipcMain.handle('update:check', () => updater.check(app, shell));
+  ipcMain.handle('update:download', () => updater.download(app));
+  ipcMain.handle('update:install', () => updater.install(app));
+  ipcMain.handle('update:open-release', () => updater.openRelease(shell));
+
   /* ---- 手机遥控 ---- */
   ipcMain.handle('remote:start', async () => {
     try {
-      if (!remote) {
-        remote = new RemoteService(handleRemoteAction);
-        remote.setPage(remotePageHtml());
-      }
-      const info = await remote.start();
+      const info = await startRemoteService();
       console.log('[remote] started at', info.url);
       return { ok: true, ...info };
     } catch (e) {
@@ -608,6 +709,17 @@ function setupIpc() {
 }
 
 /* ------------------------- 手机遥控 ------------------------- */
+/** 统一入口：确保服务实例存在并启动（IPC 与开机自启共用） */
+async function startRemoteService() {
+  if (!remote) {
+    remote = new RemoteService(handleRemoteAction);
+    remote.setPage(remotePageHtml());
+    // 让 /ping 能回显启动台是否在前台，手机页据此自动跳回导航卡片
+    remote.setFrontProvider(launcherActive);
+  }
+  return remote.start();
+}
+
 /**
  * 把手机指令映射成实际动作。
  * 分两类：
@@ -634,6 +746,18 @@ async function injectKey(vk, label) {
   return r.ok ? { ok: true, injected: label || vk } : r;
 }
 
+/** 把组合键注入到前台程序，如 ['alt','enter'] / ['ctrl','right'] / ['alt','f4'] */
+async function injectCombo(names, label) {
+  if (!WIN) return { ok: false, error: '键盘注入仅 Windows 支持' };
+  const vks = (names || []).map((n) => (typeof n === 'number' ? n : (VK[n] || 0)));
+  if (vks.some((v) => !v)) return { ok: false, error: '未知组合键' };
+  const r = await winInput.combo(vks);
+  if (!r.ok && win && !win.isDestroyed()) {
+    win.webContents.send('remote:toast', `组合键注入失败：${r.error || '未知原因'}`);
+  }
+  return r.ok ? { ok: true, injected: label || names.join('+') } : r;
+}
+
 function handleRemoteAction(action, params = {}) {
   // ---- 导航类：自动跟随 ----------------------------------------------
   // 启动台在前台 -> 复用渲染层 Focus / activateFocused / handleBack；
@@ -653,7 +777,10 @@ function handleRemoteAction(action, params = {}) {
   if (action === 'playpause') return injectKey('space', '播放/暂停');
   if (action === 'ffwd') return injectKey('right', '快进');
   if (action === 'rew') return injectKey('left', '快退');
-  if (action === 'fullscreen') return injectKey('f', '全屏');
+  // 全屏：爱奇艺/腾讯视频等普遍用 Alt+Enter，比 F 更通用
+  if (action === 'fullscreen') return injectCombo(['alt', 'enter'], '全屏(Alt+Enter)');
+  // 下一集：主流播放器通用 Ctrl+→（用独立动作名，避免与系统媒体键 next 冲突）
+  if (action === 'nextep') return injectCombo(['ctrl', 'right'], '下一集(Ctrl+→)');
 
   // ---- 唤出 / 收起启动台 ---------------------------------------------
   if (action === 'toggle' || action === 'home') {
@@ -689,18 +816,13 @@ function handleRemoteAction(action, params = {}) {
     if (win && !win.isDestroyed()) win.webContents.send('remote:power', action);
     return { ok: true, pending: true };
   }
-  // ---- 关闭最近启动的程序 ---------------------------------------------
+  // ---- 关闭当前程序：模拟 Alt+F4 关闭前台窗口 -------------------------
+  // 比按 pid 强杀更自然：让程序自己走正常关闭流程，也适用于非启动台打开的程序。
   if (action === 'closeapp') {
-    if (!lastLaunchedPid) {
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('remote:toast', '没有可关闭的程序（该应用由系统方式打开）');
-      }
-      return { ok: false, error: '没有可关闭的程序' };
-    }
-    return terminatePid(lastLaunchedPid).then((r) => {
+    return injectCombo(['alt', 'f4'], '关闭窗口(Alt+F4)').then((r) => {
       if (r.ok) lastLaunchedPid = 0;
       if (win && !win.isDestroyed()) {
-        win.webContents.send('remote:toast', r.ok ? '已关闭上一个程序' : ('关闭失败：' + (r.error || '未知原因')));
+        win.webContents.send('remote:toast', r.ok ? '已向前台窗口发送关闭指令' : ('关闭失败：' + (r.error || '未知原因')));
       }
       return r;
     });
@@ -749,7 +871,10 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // 第一件事: 先亮出启动画面, 盖住后面读配置/建窗口的等待
+    createSplash();
+
     store = new Store(DATA_DIR);
     icons = new IconCache(ICON_DIR, async (p) => {
       if (!p) return null;
@@ -763,6 +888,28 @@ if (!gotLock) {
     setupIpc();
     setupAutostartContext();
     createWindow();
+
+    // 任务栏自动隐藏: 设置开启则启动时隐藏, 退出时还原(见 before-quit)
+    if (WIN && store.settings.autoHideTaskbar === true) {
+      setTimeout(() => {
+        taskbar.enable(DATA_DIR).then((r) => {
+          if (r && !r.ok) console.warn('[taskbar] 自动隐藏失败', r.error);
+        }).catch(() => {});
+      }, 1500);
+    }
+
+    // 手机遥控常驻: 之前开启过就自动重启服务, 二维码角标随界面恢复显示, 不用每次去设置里点
+    if (store.settings.remoteAlwaysOn === true) {
+      setTimeout(() => {
+        startRemoteService().then((info) => {
+          console.log('[remote] auto-started at', info.url);
+          // 通知渲染层显示常驻二维码角标（自动启动晚于渲染层初始化）
+          if (win && !win.isDestroyed()) win.webContents.send('remote:started', info);
+        }).catch((e) => {
+          console.warn('[remote] auto-start failed', e && e.message);
+        });
+      }, 1200);
+    }
 
     // Ctrl+Alt+L 呼出/收起启动台 —— 应用被置顶时靠它回来
     for (const acc of ['Control+Alt+L', 'Control+Alt+Space']) {
@@ -799,6 +946,8 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     if (store) store.flush();
+    // 还原任务栏: 同步执行, 确保退出前用户的任务栏已经回来
+    try { if (taskbar.isActive(DATA_DIR)) taskbar.restore(DATA_DIR, true); } catch { /* ignore */ }
     try { globalShortcut.unregisterAll(); } catch {}
     try { if (remote) remote.stop(); } catch { /* ignore */ }
     try { winInput.stop(); } catch { /* ignore */ }

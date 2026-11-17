@@ -27,7 +27,7 @@ const ALLOWED = new Set([
   'volup', 'voldown', 'mute', 'play', 'next', 'prev',
   'closeapp',
   // 播放控制（自动跟随：注入真实键盘）
-  'playpause', 'ffwd', 'rew', 'fullscreen',
+  'playpause', 'ffwd', 'rew', 'fullscreen', 'nextep',
   // 鼠标 / 键盘模拟（注入到前台程序）
   'mmove', 'mclick', 'mrclick', 'mdown', 'mup', 'mwheel', 'type', 'key',
 ]);
@@ -128,7 +128,17 @@ class RemoteService {
     this.port = DEFAULT_PORT;
     this.addr = '';
     this._addresses = [];
+    // 启动计数器：每当启动台打开一个程序就 +1，手机页检测到变化后自动跳到播放遥控卡片
+    this.launchSeq = 0;
+    // 启动台是否在前台的状态提供者（由主进程注入，remote.js 本身不依赖 Electron）
+    this.frontProvider = null;
   }
+
+  /** 通知手机页"有新程序被打开"（由主进程 afterLaunch 调用） */
+  notifyLaunch() { this.launchSeq++; }
+
+  /** 注入"启动台是否在前台"的查询函数，供 /ping 回显给手机页 */
+  setFrontProvider(fn) { this.frontProvider = typeof fn === 'function' ? fn : null; }
 
   get running() { return !!this.server; }
 
@@ -157,9 +167,11 @@ class RemoteService {
         return res.end(html);
       }
 
-      // 健康检查：手机进来先探一下，顺便回显 token 是否还有效
+      // 健康检查：手机进来先探一下，回显 token 是否有效、是否有新程序被打开、启动台是否在前台
       if (req.method === 'GET' && url.pathname === '/ping') {
-        return json(res, 200, { ok: true, app: 'LaunchPlay', running: true });
+        let front = false;
+        try { front = self.frontProvider ? !!self.frontProvider() : false; } catch { /* ignore */ }
+        return json(res, 200, { ok: true, app: 'LaunchPlay', running: true, launchSeq: self.launchSeq, front });
       }
 
       // 指令入口

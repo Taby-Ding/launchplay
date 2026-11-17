@@ -2,10 +2,10 @@
   "name": "launchplay",
   "productName": "LaunchPlay",
   "version": "1.0.0",
-  "description": "影音快启 (LaunchPlay) —— 把电脑变成电视式全屏大屏启动器，Windows / Linux 通用",
+  "description": "影游快启 (LaunchPlay) —— 把电脑变成电视式全屏大屏启动器，Windows / Linux 通用",
   "main": "src/main.js",
   "author": "Taby-Ding",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "repository": {
     "type": "git",
@@ -33,6 +33,7 @@
     "prepare-electron": "node tools/prepare-electron.js",
     "dist": "npm run dist:win",
     "dist:win": "node tools/prepare-electron.js && electron-builder --win portable --x64 --config.electronDist=build/electron-dist",
+    "dist:win:setup": "node tools/prepare-electron.js && electron-builder --win nsis --x64 --config.electronDist=build/electron-dist",
     "dist:linux": "electron-builder --linux AppImage tar.gz --x64",
     "dist:mac": "electron-builder --mac zip --x64 --arm64",
     "dist:all": "npm run dist:win && npm run dist:linux && npm run dist:mac"
@@ -47,6 +48,13 @@
     "asar": true,
     "compression": "maximum",
     "afterPack": "tools/after-pack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Taby-Ding",
+        "repo": "launchplay"
+      }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -73,6 +81,21 @@
     "portable": {
       "artifactName": "LaunchPlay-${version}-windows-x64.${ext}",
       "unpackDirName": "LaunchPlay"
+    },
+    "nsis": {
+      "artifactName": "LaunchPlay-${version}-windows-x64-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "影游快启",
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "zh-CN",
+        "en-US"
+      ],
+      "language": "2052"
     },
     "mac": {
       "target": [
@@ -122,5 +145,8 @@
         }
       }
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }
