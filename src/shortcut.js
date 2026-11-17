@@ -3,20 +3,22 @@
  * shortcut.js —— 原生解析 Windows 快捷方式(.lnk)
  *
  * 为什么要自己解析:
- *   1) 之前靠 PowerShell + WScript.Shell 解析, 单个快捷方式要 2~3 秒(冷启动更久),
- *      而"浏览…"是同步等待的, 体验很差;
- *   2) 某些安全策略下 powershell.exe 起不来, 解析就静默失败 —— 结果是 target 停在 .lnk,
- *      图标只能退回 Shell 给的"空白页+快捷方式箭头"(40x40 通用图标),
- *      用户看到的就是"自动获取图标失效"。
+ *   早期版本靠外部脚本 + WScript.Shell 解析, 单个快捷方式要 2~3 秒, 而且很多机器上
+ *   那个进程会被安全策略直接拦掉 —— 表现是"同一份程序, 在这台电脑能提取图标,
+ *   换一台电脑就全变字母磁贴"。现在完全不依赖外部进程。
  *
- * 这里直接读 Shell Link 二进制格式(MS-SHLLINK), 1ms 拿到 TargetPath / Arguments /
- * IconLocation。解析不出来时调用方再退回 PowerShell。
+ * 两级解析:
+ *   1) 纯 JS 读 Shell Link 二进制(MS-SHLLINK): 1ms 拿到 LocalBasePath / IconLocation
+ *   2) Electron 的 shell.readShortcutLink(): 走 Windows Shell 自己解析, 能补上
+ *      "只有 LinkTargetIDList、没有 LocalBasePath" 的快捷方式(系统工具、MSI 安装、
+ *      部分开始菜单项)。纯 Node 环境(单元测试)自动跳过这一级。
  *
- * 只处理本地快捷方式; 指向 MSI 发布点(Darwin 描述符)这类特殊快捷方式拿不到
- * LocalBasePath, 会如实返回空路径, 由调用方回退。
+ * 另外做一次路径重定位: 快捷方式里写死的是绝对路径, 换电脑后盘符 / 32-64 位目录 /
+ * Windows 用户名都可能变, 按这几类差异找到本机真实存在的同名文件并修正。
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const HEADER_SIZE = 0x4c;
@@ -31,6 +33,10 @@ const FLAG = {
   ICON_LOCATION: 0x00000040,
   IS_UNICODE: 0x00000080,
 };
+
+function isFile(p) {
+  try { return !!p && fs.statSync(p).isFile(); } catch { return false; }
+}
 
 /** 读以 \0 结尾的字符串 */
 function cstr(buf, off, unicode) {
@@ -56,7 +62,7 @@ function readStringData(buf, p, unicode) {
   return { value: unicode ? raw.toString('utf16le') : raw.toString('latin1'), next: start + bytes };
 }
 
-/** 展开 %ProgramFiles% 之类的环境变量 */
+/** 展开 %ProgramFiles% / %windir% 之类的环境变量(Windows 变量名大小写不敏感) */
 function expandEnv(s) {
   return String(s || '').replace(/%([^%]+)%/g, (all, name) => {
     const v = process.env[name] !== undefined
@@ -73,8 +79,44 @@ function stripIconIndex(s) {
 }
 
 /**
- * 解析 .lnk
- * @returns {{lnk:string,target:string,args:string,workingDir:string,iconLocation:string}|null}
+ * 换电脑后按几类确定性差异探测真实路径。
+ * 不做全盘搜索: 慢, 而且容易把同名但完全不同的程序认错。
+ * @returns {string} 第一个真实存在的文件路径, 找不到返回 ''
+ */
+function findExistingPath(raw) {
+  const target = String(raw || '').trim().replace(/\//g, '\\');
+  if (!target) return '';
+  if (isFile(target)) return target;
+  if (process.platform !== 'win32') return '';
+
+  const m = target.match(/^([A-Za-z]:)\\(.*)$/);
+  if (!m) return '';
+  const rest = m[2];
+  const home = os.homedir().replace(/[\\/]+$/, '');
+  const homeRest = home.replace(/^[A-Za-z]:\\/, '');
+  const userRe = /^Users\\[^\\]+/i;
+
+  // 路径主体变体
+  const rests = [rest];
+  const add = (r) => { if (r && r !== rest && !rests.includes(r)) rests.push(r); };
+  add(rest.replace(/Program Files \(x86\)/gi, 'Program Files'));
+  add(rest.replace(/Program Files(?! \(x86\))/gi, 'Program Files (x86)'));
+  add(rest.replace(userRe, homeRest));
+  for (const r of rests.slice()) add(r.replace(userRe, homeRest));
+
+  const drives = [m[1], process.env.SystemDrive || 'C:', 'C:', 'D:', 'E:', 'F:'];
+  for (const d of drives) {
+    for (const r of rests) {
+      const cand = d + '\\' + r;
+      if (isFile(cand)) return cand;
+    }
+  }
+  return '';
+}
+
+/**
+ * 纯 JS 解析 .lnk
+ * @returns {{lnk:string,target:string,args:string,workingDir:string,iconLocation:string,name:string,relative:string}|null}
  */
 function parseShortcut(lnkPath) {
   let buf;
@@ -99,7 +141,7 @@ function parseShortcut(lnkPath) {
     p += 2 + size;
   }
 
-  const out = { lnk: lnkPath, target: '', args: '', workingDir: '', iconLocation: '' };
+  const out = { lnk: lnkPath, target: '', args: '', workingDir: '', iconLocation: '', name: '', relative: '' };
 
   // LinkInfo: 本地路径的主要来源
   if (flags & FLAG.LINK_INFO) {
@@ -153,14 +195,96 @@ function parseShortcut(lnkPath) {
   return out;
 }
 
-/** 解析并校验目标是否存在 */
-function resolveShortcut(lnkPath) {
-  const r = parseShortcut(lnkPath);
-  if (!r) return null;
-  const exists = (p) => { try { return !!p && fs.statSync(p).isFile(); } catch { return false; } };
-  r.targetExists = exists(r.target);
-  r.iconExists = exists(r.iconLocation);
-  return r;
+/** Electron 的 Windows Shell 解析, 覆盖 IDList 型快捷方式; 纯 Node 环境返回 null */
+function readWithShell(lnkPath) {
+  let shell;
+  try {
+    const el = require('electron');
+    shell = el && el.shell;
+  } catch { return null; }
+  if (!shell || typeof shell.readShortcutLink !== 'function') return null;
+  try {
+    const r = shell.readShortcutLink(lnkPath);
+    if (!r) return null;
+    return {
+      target: expandEnv(String(r.target || '')),
+      args: String(r.args || ''),
+      workingDir: expandEnv(String(r.cwd || '')),
+      iconLocation: expandEnv(stripIconIndex(String(r.icon || ''))),
+    };
+  } catch { return null; }
 }
 
-module.exports = { parseShortcut, resolveShortcut, stripIconIndex };
+/**
+ * .url (Internet Shortcut) —— Steam / Epic 的游戏快捷方式大多是这个格式:
+ *   [InternetShortcut]
+ *   URL=steam://rungameid/123456          (或 com.epicgames.launcher://apps/...)
+ *   IconFile=D:\Games\Foo\Foo.exe
+ *   IconIndex=0
+ *
+ * 它只有协议链接、没有可执行目标, 图标只能从 IconFile 拿。以前完全没解析这类文件,
+ * 于是这几个平台的游戏图标一律退化成字母磁贴。游戏库又常装在非系统盘,
+ * 换电脑后盘符一变, IconFile 也跟着失效 —— 所以这里顺带做一次路径重定位。
+ */
+function parseUrlShortcut(file) {
+  let txt;
+  try { txt = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const get = (key) => {
+    const m = txt.match(new RegExp('(?:^|\\r?\\n)\\s*' + key + '\\s*=\\s*([^\\r\\n]+)', 'i'));
+    return m ? m[1].trim().replace(/^"|"$/g, '') : '';
+  };
+  const raw = expandEnv(stripIconIndex(get('IconFile')));
+  return { url: get('URL'), iconPath: findExistingPath(raw), iconFileRaw: raw };
+}
+
+/**
+ * 解析并校验目标是否存在。
+ * 两级解析结果合并, 再做一次跨电脑路径重定位。
+ */
+function resolveShortcut(lnkPath) {
+  const own = parseShortcut(lnkPath);
+  const sh = readWithShell(lnkPath);
+  if (!own && !sh) return null;
+
+  const targetCandidates = [own && own.target, sh && sh.target].filter(Boolean);
+  const iconCandidates = [own && own.iconLocation, sh && sh.iconLocation].filter(Boolean);
+
+  const out = {
+    lnk: lnkPath,
+    target: '',
+    args: (own && own.args) || (sh && sh.args) || '',
+    workingDir: (own && own.workingDir) || (sh && sh.workingDir) || '',
+    iconLocation: '',
+    resolvedBy: '',
+    relocated: false,
+  };
+
+  // 目标: 逐个候选做重定位, 取第一个在本机真实存在的
+  let chosen = '';
+  for (const t of targetCandidates) {
+    const hit = findExistingPath(t);
+    if (hit) {
+      chosen = hit;
+      out.resolvedBy = hit === t ? 'native' : 'relocated';
+      out.relocated = hit !== t;
+      break;
+    }
+  }
+  // Shell 解析出来的路径即使不存在也比纯 JS 的空值有用(至少能提示用户)
+  out.target = chosen || targetCandidates[0] || '';
+  if (!chosen && sh && sh.target) out.resolvedBy = 'shell';
+  out.targetExists = isFile(out.target);
+
+  // 图标位置: 同样重定位一次; 都无效时退回目标程序自身
+  let iconHit = '';
+  for (const i of iconCandidates) iconHit = findExistingPath(i) || iconHit;
+  out.iconLocation = iconHit || (out.targetExists ? out.target : '');
+  out.iconExists = isFile(out.iconLocation);
+
+  return out;
+}
+
+module.exports = {
+  parseShortcut, resolveShortcut, parseUrlShortcut, readWithShell, findExistingPath,
+  stripIconIndex, expandEnv,
+};

@@ -499,7 +499,8 @@ function setupIpc() {
       filters,
     });
     if (r.canceled || !r.filePaths.length) return null;
-    const deep = r.filePaths.length === 1; // 只有单个时才深入解析, 批量时保证速度
+    // 解析现在走纯 JS + Electron Shell(1ms 量级), 不再启动外部进程, 多选也逐个解析
+    const deep = true;
     const out = [];
     for (const f of r.filePaths) {
       try {

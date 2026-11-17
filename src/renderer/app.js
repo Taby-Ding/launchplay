@@ -637,6 +637,10 @@ async function openAdd() {
   const $args = $('#fArgs', body);
   const $iconLabel = $('#fIconLabel', body);
   let iconFile = '';
+  // 选择窗口解析 .lnk 得到的图标位置。换电脑后目标 exe 常常找不到,
+  // 但快捷方式里记录的 IconLocation 仍然有效, 不能像以前那样丢掉。
+  let pickedIconPath = '';
+  let pickedWarning = '';
 
   async function refreshPreview() {
     const wrap = $('#iconPreviewWrap', body);
@@ -646,7 +650,10 @@ async function openAdd() {
     wrap.innerHTML = '<span class="dim">正在提取图标…</span>';
     let url = '';
     try {
-      const map = await api.ensureIcons([{ id: 'preview', kind: 'exe', target: p, iconPath: p, appId: '', name: '' }]);
+      const map = await api.ensureIcons([{
+        id: 'preview', kind: 'exe', target: p,
+        iconPath: pickedIconPath || p, appId: '', name: '',
+      }]);
       url = (map && map.preview) || '';
     } catch { url = ''; }
     wrap.innerHTML = url
@@ -662,9 +669,12 @@ async function openAdd() {
     if (files.length === 1) {
       const f = files[0];
       $path.value = f.path || '';
+      pickedIconPath = f.iconPath || '';
+      pickedWarning = f.warning || '';
       if (!$name.value.trim()) $name.value = f.name || '';
       if (f.args) $args.value = f.args;
       refreshPreview();
+      if (pickedWarning) toast(pickedWarning, 'err', 4200);
       Focus.set($('#aSave', modal), { noScroll: true });
       return;
     }
@@ -687,6 +697,8 @@ async function openAdd() {
   });
 
   $path.addEventListener('blur', refreshPreview);
+  // 手动改路径后, 之前那个快捷方式的 IconLocation 就不该再跟着用了
+  $path.addEventListener('input', () => { pickedIconPath = ''; pickedWarning = ''; });
 
   // 输入框内按 Enter 直接提交
   [$path, $name, $args].forEach((el) => {
@@ -709,7 +721,11 @@ async function openAdd() {
       return;
     }
     closeModal();
-    await addApp({ name, target: p, args: ar, kind: 'exe', iconPath: p, iconFile, iconCustom: !!iconFile });
+    await addApp({
+      name, target: p, args: ar, kind: 'exe',
+      iconPath: pickedIconPath || p, iconFile, iconCustom: !!iconFile,
+    });
+    if (pickedWarning) toast(pickedWarning, 'err', 4200);
     toast(`已添加 · ${name}`, 'ok', 1600);
   }
 
@@ -1254,6 +1270,7 @@ async function addApp(app, opts = {}) {
     appId: app.appId || '',
     iconFile: app.iconFile || '',
     iconCustom: !!app.iconCustom,
+    iconPath: app.iconPath || '',
     addedAt: Date.now(),
   };
   if (item.kind === 'uwp' && !item.appId) { toast('应用标识缺失，无法添加', 'err'); return null; }
@@ -1522,6 +1539,7 @@ async function repairIcons() {
   try {
     map = await api.ensureIcons(need.map((it) => ({
       id: it.id, kind: it.kind, target: it.target, appId: it.appId, name: it.name,
+      iconPath: it.iconPath || it.target,
     })));
   } catch { return false; }
   if (!map) return false;

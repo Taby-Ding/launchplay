@@ -26,6 +26,14 @@
 - **图标只有一个源**：`build/icon.png`（512×512，由 `npm run icon` 现场绘制），Windows 另出 `build/icon.ico`，运行时窗口图标用打进 asar 的 `src/assets/icon.png`
 - **CI 改为平台矩阵**：Windows / Ubuntu 各自在原生 runner 上构建，tag 推送时统一挂到同一个 Release
 
+### 修复
+
+- **Steam / Epic 游戏快捷方式取不到图标**：这两个平台的游戏快捷方式多是 `.url`（Internet Shortcut），内容只有 `steam://rungameid/…` / `com.epicgames.launcher://…` 协议和一个 `IconFile=`，没有可执行目标。旧版完全没解析 `.url`，图标一律退化成字母磁贴。现在读出 `IconFile` 并从对应 exe 提取高清图标；`.lnk` 分支也补上 Electron Shell 解析，覆盖只有 `LinkTargetIDList`、没有 `LocalBasePath` 的快捷方式。
+- **换电脑后游戏图标丢失**：游戏库常装在非系统盘，快捷方式里写死的绝对路径换机即失效。新增按盘符 / `Program Files (x86)` / Windows 用户名差异的路径重定位，只有真在本机找到同名文件才采用；找不到时明确提示，不再静默留白。
+- **快捷方式解析不再依赖外部脚本进程**：移除 `src/ps-scripts.js`。旧方案在部分机器上会被安全策略静默拦截，表现正是「这台电脑能提取图标、换一台就不行」。
+- **系统图标兜底改为分级**：旧版对 `.lnk` 一刀切禁用 `getFileIcon`，解析失败就一个图标都没有；现在优先对真实文件取图标，并过滤掉 40×40 的通用空白图标。
+- **单选添加时不再丢弃 `iconPath`**：浏览窗口解析出的 `IconLocation` 现在会一路带到图标预览与最终保存；启动自愈也会重试 `.url` 里的 `IconFile`，旧配置无需重新添加。
+
 ### 保留（1.0 之前完成、本版本一并发布）
 
 - 全屏磁贴启动台、空间导航焦点算法（方向键自动找最近磁贴）
@@ -34,7 +42,7 @@
 - 自定义背景图片：暗度四档、虚化开关、恢复默认壁纸；图片复制进数据目录，原图挪走不裂
 - 内置电视渐变壁纸，开箱即有客厅感
 - 高清图标：Windows 从 PE 资源取 256×256 原图；Linux 取主题里最大尺寸
-- Windows 快捷方式图标修复：自写 Shell Link 解析，1.4ms 拿到真实目标（原 PowerShell 方案 2.4s 且会静默失败）
+- Windows 快捷方式图标：纯 JS 解析 Shell Link + Electron Shell 兜底，1.4ms 拿到真实目标，不依赖外部脚本进程
 - Windows 窗口增强：常驻 PowerShell 辅助进程，新窗口铺满 + 置顶，闲置 10 分钟自动退出
 - 全局热键 `Ctrl+Alt+L` 唤回 / 收起启动台
 - 开机自启两个平台均为一键开关，失败不破坏开关状态
@@ -43,3 +51,4 @@
 
 - Linux 没有"把别的程序变成全屏"的等价接口，设置里该项标注为仅 Windows 支持
 - Linux 上只在非标准路径提供图标的少数应用会退化为字母磁贴
+- Steam / Epic 游戏库若装在重定位规则覆盖不到的位置（NAS、移动硬盘、深层自定义目录），快捷方式里的 `IconFile` 仍会失效；此时请在「编辑应用」里手动指定图标，或直接选择游戏 exe

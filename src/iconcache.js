@@ -35,6 +35,17 @@ function isSvg(buf) {
   return head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
 }
 
+/**
+ * Windows 对"文件没有内嵌图标"返回的通用图标(空白页 / 空白页+箭头):
+ * 40x40、几百字节, 放大到磁贴上是一块空白, 不如用字母磁贴。
+ * 只用于系统图标回退的结果, 不影响用户手选的图片和 PE 提取的高清图标。
+ */
+function isGenericIcon(buf) {
+  if (!buf || buf.length < 24 || buf.length >= 1600) return false;
+  if (buf.readUInt32BE(0) !== 0x89504e47) return false;
+  return buf.readUInt32BE(16) <= 48 && buf.readUInt32BE(20) <= 48;
+}
+
 /** 判断图标是否清晰到值得使用: 太小的图放大后会很糊, 不如用字母磁贴 */
 function acceptIcon(buf) {
   if (!buf || buf.length < 32) return false;
@@ -81,6 +92,10 @@ class IconCache {
 
     if (WIN) {
       const isLnk = /\.lnk$/i.test(target);
+      // 选 .lnk 时, 解析阶段已经把 IconLocation 放进 iconPath 了。
+      // 换电脑后目标 exe 常常找不到, 但图标位置往往还有效, 所以把它排在最前面。
+      const picked = stripIndex(item.iconPath);
+      if (picked && !/\.lnk$/i.test(picked)) push(picked);
       push(target);
       if (isLnk) {
         try {
@@ -88,11 +103,19 @@ class IconCache {
           const sc = resolveShortcut(target);
           if (sc) {
             push(sc.target);
-            if (sc.iconExists) push(sc.iconLocation);
+            push(sc.iconLocation); // 不再要求 iconExists, push 内部会 stat
           }
         } catch { /* 解析失败就只用 .lnk 本身 */ }
       }
-      push(stripIndex(item.iconPath));
+      // Steam / Epic 的 .url: 图标藏在文件里的 IconFile= 字段
+      // (启动自愈时 item 可能只有 target, 没有解析过的 iconPath, 这里补一次)
+      if (/\.url$/i.test(target)) {
+        try {
+          const { parseUrlShortcut } = require('./shortcut');
+          const u = parseUrlShortcut(target);
+          if (u && u.iconPath) push(u.iconPath);
+        } catch { /* 忽略 */ }
+      }
       return out;
     }
 
@@ -194,16 +217,22 @@ class IconCache {
     let got = null;
     try { got = this.extract(item); } catch { got = null; }
 
-    // 系统图标回退: 只给非快捷方式用。
-    // 对 .lnk 调用 getFileIcon 拿到的一定是"空白文件 + 快捷方式箭头"的通用图标,
-    // 显示出来反而比首字母磁贴更让人困惑。
-    const target = String(item.target || '').trim();
-    const isLnk = /\.lnk$/i.test(target);
-    if (!got && !isLnk && this.fallback) {
-      try {
-        const fb = await this.fallback(target || IconCache.sourcesOf(item)[0]);
-        if (acceptIcon(fb)) got = { buf: fb, ext: '.png' };
-      } catch { got = null; }
+    // 系统图标回退: 先对真实文件(目标 exe / IconLocation)要图标, 最后才轮到 .lnk 本身。
+    // 老版本对 .lnk 一刀切禁用回退, 于是快捷方式一旦解析不出来就一个图标都没有 ——
+    // 这正是"换台电脑后图标全变字母"最直接的一层。
+    // getFileIcon 对没有内嵌图标的文件会返回通用空白图标, 快捷方式条目把它过滤掉。
+    if (!got && this.fallback) {
+      const target = String(item.target || '').trim();
+      const isLnk = /\.lnk$/i.test(target);
+      const sources = IconCache.sourcesOf(item);
+      const fbCandidates = sources.filter((p) => !/\.lnk$/i.test(p));
+      if (isLnk) fbCandidates.push(target);
+      for (const p of fbCandidates) {
+        let fb = null;
+        try { fb = await this.fallback(p); } catch { fb = null; }
+        const generic = isLnk && isGenericIcon(fb);
+        if (acceptIcon(fb) && !generic) { got = { buf: fb, ext: '.png' }; break; }
+      }
     }
 
     if (!got) {
