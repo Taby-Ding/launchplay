@@ -1,3 +1,4 @@
+# 统一换行符策略；图标、安装包等二进制资源不做任何转换
 * text=auto eol=lf
 
 *.bat text eol=crlf
