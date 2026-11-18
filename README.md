@@ -30,6 +30,7 @@
 | --- | --- | --- | --- | --- |
 | **Windows 10/11**（推荐） | x64 | [LaunchPlay-1.0.0-windows-x64-setup.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64-setup.exe) | ~78 MB | **安装版**：装一次到固定目录，之后启动最快；支持「设置 → 关于」里一键检查更新 |
 | **Windows 10/11** | x64 | [LaunchPlay-1.0.0-windows-x64.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64.exe) | ~71 MB | 免安装便携版：单文件双击即用，不用安装，但每次启动都要自解压 |
+| **Windows 7**（专用版） | x64 | [LaunchPlay-1.0.0-windows-x64-win7.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64-win7.exe) | ~56 MB | 仅给 Win7 用：基于 Electron 22 单独构建，需 SP1 + KB2533623/KB2670838；详见 [Win7 说明](https://github.com/Taby-Ding/launchplay/releases/tag/v1.0.0) |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.AppImage](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.AppImage) | ~110 MB | 通用单文件，`chmod +x` 后直接运行 |
 | **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.tar.gz](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.tar.gz) | ~111 MB | 解压即用的绿色目录，AppImage 跑不起来时用它 |
 
@@ -43,6 +44,8 @@
 > | 便携版 exe | 无需安装 | 约 8–10 秒（每次自解压 70MB + 杀软扫描） | ❌ 需手动下载新版 | 临时用、不想装到系统 |
 >
 > 便携版每次双击都要把整个程序解压到临时目录，慢就慢在这里；安装版装一次后不再解压，所以快很多。
+>
+> **Win7 用户请下载专用版**（`-win7.exe`）：主版本基于 Electron 38，从 Electron 23 起官方已不支持 Win7，无法在 Win7 启动；专用版基于 Electron 22 单独构建，与上面两个版本完全隔离（独立 AUMID 和数据目录，可共存）。它要求 Win7 SP1，并建议先装 KB2533623、KB2670838 两个补丁（精简版系统常见缺失，缺了会打不开）。Win7 版不支持应用内自动更新，请在「关于」里点「打开下载页」手动获取新版。
 >
 > Linux AppImage 由 CI 在 Ubuntu runner 上构建（原因见[构建说明](#构建说明)）；Windows 包与 Linux tar.gz 已在本地验证过可运行。
 
@@ -228,6 +231,7 @@ cd LaunchPlay-1.0.0-linux-x64
 | 平台 | 要求 |
 | --- | --- |
 | Windows | Windows 10 1809 及以上 / Windows 11，x64；无需 .NET、无需 VC++ 运行库、无需管理员权限 |
+| Windows 7 | 仅专用版（`-win7.exe`）：Win7 SP1 x64，需 KB2533623、KB2670838；不支持应用内更新 |
 | Linux | x64 桌面发行版，需要图形环境（X11 或 Wayland）；推荐 glibc 2.28+ |
 
 建议 1920×1080 及以上分辨率（为 16:9 大屏设计）。
