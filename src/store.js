@@ -22,6 +22,26 @@ const DEFAULT_SETTINGS = {
   autoHideTaskbar: true,  // 默认开启：启动台运行时隐藏 Windows 任务栏, 退出后还原
   // 字号缩放系数：1.3 = 默认(即原"更大"档的字号), 见 style.css 的 --fs 与 app.js 的 FONT_SCALES
   fontScale: 1.3,
+  // 左上角天气：'auto' = 按 IP 自动定位，其余为 9 位城市编码（见 weather-cities.js）
+  weatherCity: 'auto',
+  // 手机遥控万能键：最多 4 个，{ name: '显示名', combo: ['ctrl','alt','f5'] }
+  customKeys: [],
+  // 家长守护：密码哈希只存主进程，渲染层拿到的是脱敏后的副本
+  parental: {
+    enabled: false,
+    passSalt: '',
+    passHash: '',
+    intervalMin: 60,   // 每隔多少分钟强制休息
+    restMin: 10,       // 每次强制休息多少分钟
+    quizEnabled: true, // 允许答题正确后提前结束休息
+    lockdown: false,   // 轻量加固：禁任务管理器/Win 键、被结束后自动拉起、防切回桌面
+    // 下面 4 个是「现实时间」计时的持久化字段，重启 / 关机都不清零。
+    // 用绝对时间戳而不是内存累加，防止重启一次就把使用时长清零。
+    usageMs: 0,        // 距上次休息结束累计使用毫秒
+    lastAt: 0,         // 上次计时的 Date.now()
+    restUntil: 0,      // 休息结束的 Date.now()（0 = 当前没在休息）
+    wrongUntil: 0,     // 答错锁定结束的 Date.now()
+  },
   // 背景: 'default' = 随程序附带的电视背景图, '' = 纯深色渐变,
   //       其它值为 backgrounds 目录下的自定义图片文件名
   background: { file: 'default', dim: 0.25, blur: false },
@@ -33,7 +53,21 @@ const DEFAULT_SETTINGS = {
 //   3 -> 4 : 二维码常驻与任务栏自动隐藏改为默认开启；引入字号缩放
 //   4 -> 5 : 字号默认档从 1 提升到 1.3（原"更大"档成为新的"标准"）
 //   5 -> 6 : 开机自启改为默认开启
-const SCHEMA_VERSION = 6;
+//   6 -> 7 : 引入天气城市、家长守护配置
+//   7 -> 8 : 天气改省市两级 9 位编码；家长守护改现实时间计时 + 轻量加固；新增万能键
+const SCHEMA_VERSION = 8;
+
+/** v7 的城市 id -> v8 的 9 位编码，保证老用户升级后天气设置不丢 */
+const LEGACY_CITY_CODES = {
+  beijing: '101010100', shanghai: '101020100', guangzhou: '101280101', shenzhen: '101280601',
+  hangzhou: '101210101', nanjing: '101190101', suzhou: '101190401', chengdu: '101270101',
+  chongqing: '101040100', wuhan: '101200101', xian: '101110101', tianjin: '101030100',
+  changsha: '101250101', zhengzhou: '101180101', jinan: '101120101', qingdao: '101120201',
+  shenyang: '101070101', dalian: '101070201', harbin: '101050101', changchun: '101060101',
+  shijiazhuang: '101090101', taiyuan: '101100101', kunming: '101290101', guiyang: '101260101',
+  nanning: '101300101', haikou: '101310101', fuzhou: '101230101', xiamen: '101230201',
+  nanchang: '101240101', hefei: '101220101', lanzhou: '101160101', urumqi: '101130101',
+};
 
 class Store {
   constructor(dir) {
@@ -52,6 +86,11 @@ class Store {
       if (parsed && typeof parsed === 'object') {
         this.data.items = Array.isArray(parsed.items) ? parsed.items.filter(Boolean) : [];
         this.data.settings = { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) };
+        // 家长守护是嵌套对象：做一次深合并，避免旧配置只带部分字段时丢掉其它默认值
+        this.data.settings.parental = {
+          ...DEFAULT_SETTINGS.parental,
+          ...((parsed.settings && parsed.settings.parental) || {}),
+        };
         this.data.firstRun = parsed.firstRun !== false;
         if (typeof parsed.version === 'number') this.data.version = parsed.version;
         this.migrate();
@@ -100,6 +139,24 @@ class Store {
       // 统一升级为开启。以后用户仍可在设置里手动关掉。
       this.data.settings.autostart = true;
       this.data.version = 6;
+      this.save();
+    }
+    if (this.data.version < 7) {
+      const s = this.data.settings;
+      if (typeof s.weatherCity !== 'string' || !s.weatherCity) s.weatherCity = 'auto';
+      s.parental = { ...DEFAULT_SETTINGS.parental, ...(s.parental || {}) };
+      this.data.version = 7;
+      this.save();
+    }
+    if (this.data.version < 8) {
+      const s = this.data.settings;
+      // 老版本用 beijing / shenzhen 这类 id，v8 起统一换成 9 位编码
+      if (typeof s.weatherCity === 'string' && s.weatherCity !== 'auto' && !/^\d{9}$/.test(s.weatherCity)) {
+        s.weatherCity = LEGACY_CITY_CODES[s.weatherCity] || 'auto';
+      }
+      s.parental = { ...DEFAULT_SETTINGS.parental, ...(s.parental || {}) };
+      if (!Array.isArray(s.customKeys)) s.customKeys = [];
+      this.data.version = 8;
       this.save();
     }
   }

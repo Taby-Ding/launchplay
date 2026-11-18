@@ -55,4 +55,27 @@ contextBridge.exposeInMainWorld('api', {
   onRemoteNav: (cb) => ipcRenderer.on('remote:nav', (_e, action) => cb(action)),
   onRemotePower: (cb) => ipcRenderer.on('remote:power', (_e, action) => cb(action)),
   onRemoteToast: (cb) => ipcRenderer.on('remote:toast', (_e, text) => cb(text)),
+
+  // 天气
+  weatherGet: (city, force) => ipcRenderer.invoke('weather:get', city, !!force),
+  weatherCities: () => ipcRenderer.invoke('weather:cities'),
+
+  // 定时关机
+  shutdownSchedule: (hours, minutes) => ipcRenderer.invoke('shutdown:schedule', hours, minutes),
+  shutdownCancel: () => ipcRenderer.invoke('shutdown:cancel'),
+  shutdownStatus: () => ipcRenderer.invoke('shutdown:status'),
+
+  // 家长守护
+  guardStatus: () => ipcRenderer.invoke('guard:status'),
+  guardVerify: (pwd) => ipcRenderer.invoke('guard:verify', pwd),
+  guardConfigure: (patch) => ipcRenderer.invoke('guard:configure', patch),
+  guardQuizInfo: () => ipcRenderer.invoke('guard:quiz-info'),
+  guardQuizImport: () => ipcRenderer.invoke('guard:quiz-import'),
+  guardQuizExportSample: () => ipcRenderer.invoke('guard:quiz-export-sample'),
+  guardQuestion: () => ipcRenderer.invoke('guard:question'),
+  guardAnswer: (idx) => ipcRenderer.invoke('guard:answer', idx),
+  onGuardState: (cb) => {
+    ipcRenderer.removeAllListeners('guard:state');
+    ipcRenderer.on('guard:state', (_e, payload) => cb(payload));
+  },
 });

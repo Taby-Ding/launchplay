@@ -23,6 +23,17 @@ const { winInput, VK } = require('./wininput');
 const { RemoteService } = require('./remote');
 const taskbar = require('./taskbar');
 const updater = require('./updater');
+const weather = require('./weather');
+const shutdown = require('./shutdown');
+const { GuardService } = require('./guard');
+const lockdown = require('./lockdown');
+
+// 看门狗模式：同一个 exe 带 --launchplay-watchdog 启动时只跑守护逻辑，不创建窗口。
+// CommonJS 模块顶层 return 合法，能把后面的 Electron 初始化整段跳过。
+if (process.argv.includes('--launchplay-watchdog')) {
+  require('./watchdog').run();
+  return;
+}
 
 const isDev = !app.isPackaged;
 const CAPTURE = process.env.TL_CAPTURE || '';
@@ -118,7 +129,27 @@ let splashPainted = false; // splash 内容是否已 did-finish-load(避免白�
 let mainReady = false;     // 主窗口是否已 ready-to-show
 let hotkeyOk = false;   // 唤回热键是否注册成功(没注册成功就不自动收起, 免得回不来)
 let remote = null;      // 手机遥控服务(默认关闭, 设置里点开启才启动)
+let guard = null;       // 家长守护服务(主进程计时 + 密码校验)
+let forceQuit = false;  // 系统关机 / app.quit() 已发起，此时不再拦窗口关闭
 let lastLaunchedPid = 0; // 最近一次由启动台打开的程序 pid, 供手机"关闭程序"使用
+let lockdownOn = false;  // 轻量加固当前是否已应用到系统（避免每秒重复写注册表）
+
+/** 家长守护开启且未临时放行时，是否要拦住这个动作 */
+function guardBlocking() { return !!(guard && guard.blocking); }
+
+/** 守护状态变化时打开/关闭轻量加固；只在状态真的翻转时动系统设置 */
+function syncLockdown(want) {
+  if (want === lockdownOn) return;
+  lockdownOn = want;
+  if (!WIN) return;
+  if (want) {
+    const r = lockdown.enable(DATA_DIR);
+    if (r.errors && r.errors.length) console.warn('[lockdown] 部分加固未生效:', r.errors.join('; '));
+  } else {
+    try { lockdown.disable(DATA_DIR); } catch { /* ignore */ }
+  }
+}
+function guardDenied() { return { ok: false, error: '家长守护已开启，此操作需要家长密码' }; }
 
 /* ------------------------- 图标协议 ------------------------- */
 protocol.registerSchemesAsPrivileged([
@@ -149,20 +180,57 @@ const MIME_BY_EXT = {
  * tlapp://bg/<文件名>    —— 自定义背景图
  * 只允许访问各自数据目录下的文件(basename 去掉任何路径成分, 防目录穿越)
  */
+/** 解析 tlapp:// 请求，统一做目录穿越校验；失败返回 null */
+function resolveTlapp(urlString) {
+  const u = new URL(urlString);
+  const host = (u.hostname || 'icon').toLowerCase();
+  const rootDir = host === 'bg' ? BG_DIR : ICON_DIR;
+  const name = path.basename(decodeURIComponent(u.pathname));
+  const full = path.join(rootDir, name);
+  if (!full.startsWith(rootDir)) return null;
+  return {
+    buf: fs.readFileSync(full),
+    type: MIME_BY_EXT[path.extname(name).toLowerCase()] || 'application/octet-stream',
+  };
+}
+
+/**
+ * protocol.handle 是 Electron 25 才加入的；Win7 专用版用的是 Electron 22.3.27，
+ * 只有旧的 register*Protocol 系列。这里按能力自动分流，主版本与 Win7 版共用同一份代码，
+ * 避免每次同步源码后 Win7 版因 API 缺失卡在启动画面。
+ */
 function registerIconProtocol() {
-  protocol.handle('tlapp', async (req) => {
+  if (typeof protocol.handle === 'function') {
+    protocol.handle('tlapp', async (req) => {
+      try {
+        const r = resolveTlapp(req.url);
+        if (!r) return new Response('forbidden', { status: 403 });
+        return new Response(new Uint8Array(r.buf), {
+          headers: { 'content-type': r.type, 'cache-control': 'max-age=604800' },
+        });
+      } catch {
+        return new Response('not found', { status: 404 });
+      }
+    });
+    return;
+  }
+
+  // Electron 22 回退实现（Win7 专用版）
+  protocol.registerBufferProtocol('tlapp', (req, callback) => {
     try {
-      const u = new URL(req.url);
-      const host = (u.hostname || 'icon').toLowerCase();
-      const rootDir = host === 'bg' ? BG_DIR : ICON_DIR;
-      const name = path.basename(decodeURIComponent(u.pathname));
-      const full = path.join(rootDir, name);
-      if (!full.startsWith(rootDir)) return new Response('forbidden', { status: 403 });
-      const buf = fs.readFileSync(full);
-      const type = MIME_BY_EXT[path.extname(name).toLowerCase()] || 'application/octet-stream';
-      return new Response(new Uint8Array(buf), { headers: { 'content-type': type, 'cache-control': 'max-age=604800' } });
+      const r = resolveTlapp(req.url);
+      if (!r) {
+        callback({ statusCode: 403, mimeType: 'text/plain', data: Buffer.from('forbidden') });
+        return;
+      }
+      callback({
+        statusCode: 200,
+        mimeType: r.type,
+        data: r.buf,
+        headers: { 'Cache-Control': 'max-age=604800' },
+      });
     } catch {
-      return new Response('not found', { status: 404 });
+      callback({ statusCode: 404, mimeType: 'text/plain', data: Buffer.from('not found') });
     }
   });
 }
@@ -348,6 +416,14 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // 家长守护：拦住应用内的关闭（Alt+F4 / 退出按钮 / 双击 Esc）。
+  // 系统关机走 before-quit 会把 forceQuit 置真，此时不拦，避免挡住正常关机。
+  win.on('close', (e) => {
+    if (guardBlocking() && !forceQuit) {
+      e.preventDefault();
+      try { win.webContents.send('remote:toast', '家长守护已开启，不能退出启动器'); } catch { /* ignore */ }
+    }
+  });
   win.on('closed', () => { win = null; });
 
   // 调试用: TL_EVAL_JS 在界面就绪后注入一段脚本(可选延后), 进程保持运行
@@ -447,7 +523,8 @@ function afterLaunch(pid) {
   }
 
   if (win && !win.isDestroyed()) {
-    if (s.hideAfterLaunch === true) {
+    // 家长守护下不收起启动台，避免露出电脑桌面
+    if (s.hideAfterLaunch === true && !guardBlocking()) {
       if (hotkeyOk) {
         try {
           win.setAlwaysOnTop(false);
@@ -490,15 +567,30 @@ function toggleLauncher() {
   // 在应用下层时(可见但没焦点) -> 拉到前台; 已在前台 -> 收起
   if (!win.isVisible()) { bringLauncherFront(); return; }
   if (!win.isFocused()) { bringLauncherFront(); return; }
+  // 家长守护：不允许把启动台收起来露出电脑桌面（唤回始终允许）
+  if (guardBlocking()) {
+    try { win.webContents.send('remote:toast', '家长守护已开启，不能切回电脑桌面'); } catch { /* ignore */ }
+    return;
+  }
   win.setAlwaysOnTop(false);
   win.hide();
 }
 
 /* ------------------------- IPC ------------------------- */
 function stateSnapshot() {
+  // 家长守护的密码哈希绝不下发到渲染层；只给一份脱敏后的状态供界面显示
+  const p = store.settings.parental || {};
+  const safeParental = {
+    enabled: !!(p.enabled && p.passHash),
+    hasPassword: !!p.passHash,
+    intervalMin: p.intervalMin || 60,
+    restMin: p.restMin || 10,
+    quizEnabled: p.quizEnabled !== false,
+    lockdown: !!p.lockdown,
+  };
   return {
     items: store.items,
-    settings: store.settings,
+    settings: { ...store.settings, parental: safeParental },
     firstRun: store.firstRun,
     dataDir: DATA_DIR,
     version: app.getVersion(),
@@ -519,11 +611,19 @@ function setupIpc() {
 
   ipcMain.handle('state:save', (_e, patch) => {
     if (!patch || typeof patch !== 'object') return stateSnapshot();
-    if (Array.isArray(patch.items)) store.items = patch.items;
-    if (patch.settings && typeof patch.settings === 'object') store.patchSettings(patch.settings);
+    if (Array.isArray(patch.items)) {
+      // 家长守护开启且未临时放行时，拒绝增删应用（孩子不能自己往启动台加东西）
+      if (!guardBlocking() || patch.items.length === store.items.length) store.items = patch.items;
+    }
+    if (patch.settings && typeof patch.settings === 'object') {
+      const s = { ...patch.settings };
+      // 家长守护只走 guard:configure：渲染层拿到的是脱敏副本，回写会抹掉密码哈希
+      delete s.parental;
+      store.patchSettings(s);
+    }
     if (typeof patch.firstRun === 'boolean') store.firstRun = patch.firstRun;
     store.save();
-    return { ok: true, items: store.items, settings: store.settings };
+    return { ok: true, items: store.items, settings: stateSnapshot().settings };
   });
 
   ipcMain.handle('icons:ensure', async (_e, list) => {
@@ -574,6 +674,7 @@ function setupIpc() {
    * 返回标准化后的条目数组, 由渲染层决定是填表还是批量添加
    */
   ipcMain.handle('dialog:pick-exe', async () => {
+    if (guardBlocking()) return guardDenied();
     // 三个平台能选的"快捷方式"差别很大: .lnk / .app / .desktop
     const filters = WIN
       ? [
@@ -629,6 +730,7 @@ function setupIpc() {
 
   // 供渲染层/外部唤起启动台(与全局热键同一入口)
   ipcMain.handle('launcher:toggle', () => {
+    if (guardBlocking()) return guardDenied();
     toggleLauncher();
     return {
       visible: !!(win && !win.isDestroyed() && win.isVisible()),
@@ -639,7 +741,10 @@ function setupIpc() {
     };
   });
 
-  ipcMain.handle('power', async (_e, action) => power(action));
+  ipcMain.handle('power', async (_e, action) => {
+    if (guardBlocking()) return guardDenied();
+    return power(action);
+  });
 
   ipcMain.handle('autostart:get', () => getAutostart());
   ipcMain.handle('autostart:set', async (_e, enabled) => {
@@ -650,14 +755,24 @@ function setupIpc() {
 
   ipcMain.handle('win:fullscreen', (_e, on) => {
     if (!win) return false;
+    // 家长守护下不允许退出全屏（否则就能看见桌面）
+    if (guardBlocking() && !on) return win.isFullScreen();
     win.setFullScreen(!!on);
     store.patchSettings({ fullscreen: !!on });
     store.save();
     return win.isFullScreen();
   });
 
-  ipcMain.handle('win:minimize', () => { if (win) win.minimize(); });
-  ipcMain.handle('win:quit', () => { if (win) win.close(); });
+  ipcMain.handle('win:minimize', () => {
+    if (guardBlocking()) return guardDenied();
+    if (win) win.minimize();
+    return { ok: true };
+  });
+  ipcMain.handle('win:quit', () => {
+    if (guardBlocking()) return guardDenied();
+    if (win) win.close();
+    return { ok: true };
+  });
 
   ipcMain.handle('os:open-path', async (_e, p) => {
     if (!p) return;
@@ -706,6 +821,55 @@ function setupIpc() {
     if (!remote || !remote.running) return { ok: false, error: '遥控服务未开启' };
     return { ok: true, ...remote.rotateToken() };
   });
+
+  /* ---- 左上角天气 ---- */
+  ipcMain.handle('weather:get', async (_e, city, force) => weather.getWeather(city, !!force));
+  // 省 / 市两级列表 + 编码到城市名的索引，供设置里的两级下拉使用
+  ipcMain.handle('weather:cities', () => ({
+    provinces: weather.PROVINCES,
+    names: weather.CITY_NAMES,
+  }));
+
+  /* ---- 定时关机 ---- */
+  ipcMain.handle('shutdown:schedule', (_e, h, m) => shutdown.schedule(h, m));
+  ipcMain.handle('shutdown:cancel', () => shutdown.cancel());
+  ipcMain.handle('shutdown:status', () => shutdown.status());
+
+  /* ---- 家长守护 ---- */
+  ipcMain.handle('guard:status', () => ({
+    cfg: guard ? guard.publicCfg() : null,
+    unlocked: !!(guard && guard.unlocked),
+    active: !!(guard && guard.state === 'resting'),
+    restLeft: guard ? guard.restLeft : 0,
+    wrongLeft: guard ? Math.max(0, Math.ceil((guard.wrongUntil - Date.now()) / 1000)) : 0,
+  }));
+  ipcMain.handle('guard:verify', (_e, pwd) =>
+    (guard ? guard.verify(pwd) : { ok: false, error: '守护服务未就绪' }));
+  ipcMain.handle('guard:configure', (_e, patch) =>
+    (guard ? guard.configure(patch) : { ok: false, error: '守护服务未就绪' }));
+  ipcMain.handle('guard:quiz-info', () =>
+    (guard ? guard.quizInfo() : { source: '内置题库', count: 0, custom: false, path: '' }));
+  ipcMain.handle('guard:quiz-import', async () => {
+    if (guardBlocking()) return guardDenied();
+    const r = await dialog.showOpenDialog(win, {
+      title: '选择题库文件（JSON）',
+      buttonLabel: '导入',
+      properties: ['openFile', 'dontAddToRecent'],
+      filters: [{ name: '题库 JSON', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+    return guard.importQuiz(r.filePaths[0]);
+  });
+  ipcMain.handle('guard:quiz-export-sample', () => {
+    if (!guard) return { ok: false, error: '守护服务未就绪' };
+    const r = guard.exportSample();
+    if (r.ok) shell.showItemInFolder(r.path);
+    return r;
+  });
+  ipcMain.handle('guard:question', () =>
+    (guard ? guard.nextQuestion() : { ok: false, error: '守护服务未就绪' }));
+  ipcMain.handle('guard:answer', (_e, idx) =>
+    (guard ? guard.answer(idx) : { ok: false, error: '守护服务未就绪' }));
 }
 
 /* ------------------------- 手机遥控 ------------------------- */
@@ -716,6 +880,18 @@ async function startRemoteService() {
     remote.setPage(remotePageHtml());
     // 让 /ping 能回显启动台是否在前台，手机页据此自动跳回导航卡片
     remote.setFrontProvider(launcherActive);
+    // 把万能键配置随 /ping 下发给手机页；在电脑端改了设置，手机不用刷新就能看到
+    remote.setConfigProvider(() => ({
+      // 只下发有组合的槽位，但带上原始下标，保证手机按下时电脑能取到正确配置
+      customKeys: (Array.isArray(store.settings.customKeys) ? store.settings.customKeys : [])
+        .slice(0, 4)
+        .map((k, i) => ({
+          name: String((k && k.name) || `万能键 ${i + 1}`).slice(0, 12),
+          index: i,
+          has: !!(k && Array.isArray(k.combo) && k.combo.length),
+        }))
+        .filter((k) => k.has),
+    }));
   }
   return remote.start();
 }
@@ -730,7 +906,7 @@ async function startRemoteService() {
 /**
  * 启动台当前是否处于"用户正在操作"的状态。
  * 可见且聚焦 -> 导航键应该走界面焦点系统；
- * 隐藏 / 失焦(在看爱奇艺等程序) -> 导航键应该注入到前台程序。
+ * 隐藏 / 失焦(在看影音软件) -> 导航键应该注入到前台程序。
  */
 function launcherActive() {
   return !!(win && !win.isDestroyed() && win.isVisible() && win.isFocused());
@@ -759,25 +935,30 @@ async function injectCombo(names, label) {
 }
 
 function handleRemoteAction(action, params = {}) {
-  // ---- 导航类：自动跟随 ----------------------------------------------
-  // 启动台在前台 -> 复用渲染层 Focus / activateFocused / handleBack；
-  // 启动台隐藏或失焦(用户在看视频) -> 注入真实键盘到前台程序：
-  //   上/下=音量±  左/右=快退/快进  确定=播放暂停  返回=退出全屏/Esc
-  //   这是爱奇艺/腾讯视频等播放器通用的键盘约定。
+  // ---- 导航类：任何时候都只做导航 ------------------------------------
+  // 需求明确：手机遥控的导航按键永远不要自动变成音量加减 / 快进快退。
+  // 播放遥控卡片里的音量、快进快退、全屏等按钮是独立入口，不受影响。
+  // launcherActive() 仍保留给 /ping 的 front 字段，驱动「自动跳到播放遥控卡片」。
   if (['up', 'down', 'left', 'right', 'ok', 'back'].includes(action)) {
-    if (launcherActive()) {
-      if (win && !win.isDestroyed()) win.webContents.send('remote:nav', action);
-      return { ok: true, mode: 'focus' };
+    if (win && !win.isDestroyed()) win.webContents.send('remote:nav', action);
+    return { ok: true, mode: 'focus' };
+  }
+
+  // ---- 万能键：手机页按下自定义组合键，配置只在电脑端保存 --------------
+  if (action === 'macro') {
+    const list = Array.isArray(store.settings.customKeys) ? store.settings.customKeys : [];
+    const item = list[params.index];
+    if (!item || !Array.isArray(item.combo) || !item.combo.length) {
+      return { ok: false, error: '这个万能键还没有设置组合' };
     }
-    const map = { up: 'volup', down: 'voldown', left: 'left', right: 'right', ok: 'space', back: 'esc' };
-    return injectKey(map[action], action).then((r) => ({ ...r, mode: 'inject' }));
+    return injectCombo(item.combo, item.name || '万能键');
   }
 
   // ---- 播放控制：始终注入真实键盘（不受启动台焦点影响） ----------------
   if (action === 'playpause') return injectKey('space', '播放/暂停');
   if (action === 'ffwd') return injectKey('right', '快进');
   if (action === 'rew') return injectKey('left', '快退');
-  // 全屏：爱奇艺/腾讯视频等普遍用 Alt+Enter，比 F 更通用
+  // 全屏：影音软件普遍用 Alt+Enter，比 F 更通用
   if (action === 'fullscreen') return injectCombo(['alt', 'enter'], '全屏(Alt+Enter)');
   // 下一集：主流播放器通用 Ctrl+→（用独立动作名，避免与系统媒体键 next 冲突）
   if (action === 'nextep') return injectCombo(['ctrl', 'right'], '下一集(Ctrl+→)');
@@ -889,6 +1070,29 @@ if (!gotLock) {
     setupAutostartContext();
     createWindow();
 
+    // 家长守护：计时、密码校验、拦截都在主进程，渲染层只负责展示
+    guard = new GuardService({
+      getCfg: () => store.settings.parental || {},
+      setCfg: (c) => { store.patchSettings({ parental: c }); store.save(); },
+      send: (ch, payload) => {
+        // 守护每秒推一次状态，顺便在这里驱动轻量加固的开关（只在翻转时写系统设置）
+        if (ch === 'guard:state' && payload) {
+          syncLockdown(!!(payload.enabled && payload.cfg && payload.cfg.lockdown && !payload.unlocked));
+        }
+        // 窗口被强杀的瞬间渲染帧可能已销毁，此时 send 会在 Electron 内部报错
+        if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+          try { win.webContents.send(ch, payload); } catch { /* ignore */ }
+        }
+      },
+      dataDir: DATA_DIR,
+    });
+    guard.push();
+    // 加固生效、且启动台打开的程序已退出时，把窗口拉回前台，避免露出桌面
+    lockdown.attachFocusGuard(win, {
+      isActive: () => !!(guard && guard.lockdown),
+      isLaunchedAppAlive: () => lockdown.isAlive(lastLaunchedPid),
+    });
+
     // 任务栏自动隐藏: 设置开启则启动时隐藏, 退出时还原(见 before-quit)
     if (WIN && store.settings.autoHideTaskbar === true) {
       setTimeout(() => {
@@ -945,7 +1149,11 @@ if (!gotLock) {
   });
 
   app.on('before-quit', () => {
-    if (store) store.flush();
+    forceQuit = true; // 系统关机 / 主动 app.quit() 不再被窗口关闭拦截
+    if (guard) guard.stop();
+    // 轻量加固：写正常退出标记、恢复注册表策略，避免退出后任务管理器/Win 键一直被禁用
+    try { lockdown.disable(DATA_DIR); } catch { /* ignore */ }
+    if (store) store.flush(); // guard.stop() 写入的最后一批时间戳同步落盘
     // 还原任务栏: 同步执行, 确保退出前用户的任务栏已经回来
     try { if (taskbar.isActive(DATA_DIR)) taskbar.restore(DATA_DIR, true); } catch { /* ignore */ }
     try { globalShortcut.unregisterAll(); } catch {}

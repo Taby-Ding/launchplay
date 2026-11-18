@@ -17,12 +17,14 @@
     <header class="topbar">
       <div class="top-left">
         <div class="brand" id="brand" title="影游快启">
-          <img src="assets/icon.png" alt="影游快启图标" draggable="false" />
-          <span class="brand-name">影游快启</span>
+          <img src="assets/brand-logo.webp" alt="影游快启" draggable="false" />
         </div>
 
         <div class="clockbox">
-          <div class="clock" id="clock">--:--</div>
+          <div class="clock-row">
+            <div class="clock" id="clock">--:--</div>
+            <div class="weather hidden" id="weather" title="天气"></div>
+          </div>
           <div class="date" id="date">&nbsp;</div>
         </div>
       </div>
@@ -84,6 +86,21 @@
   </div>
 
   <div class="toast-wrap" id="toastWrap"></div>
+
+  <!-- 家长守护：强制休息 / 答题解锁。独立于普通弹层，Esc 也关不掉 -->
+  <div class="guard-overlay hidden" id="guardOverlay" aria-live="polite">
+    <div class="guard-card">
+      <div class="guard-emoji">😴</div>
+      <h2 class="guard-title">该休息一下啦</h2>
+      <p class="guard-desc">连续使用时间到了，休息 <strong id="gRestLeft">--:--</strong> 后可继续使用</p>
+      <div class="guard-quiz hidden" id="gQuiz">
+        <div class="guard-question" id="gQuestion">正在出题…</div>
+        <div class="guard-options" id="gOptions"></div>
+        <div class="guard-msg" id="gMsg">答对下面这道题，可以立即结束休息</div>
+      </div>
+      <div class="guard-bottom">家长守护模式 · 让眼睛休息一下吧</div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

@@ -271,6 +271,146 @@ function updateClock() {
   if (de.textContent !== dt) de.textContent = dt;
 }
 
+/* ------------------------- 天气 ------------------------- */
+let weatherProvinces = [];                  // 省 / 市两级列表
+let weatherCityNames = { auto: '自动定位' }; // 9 位编码 -> 城市名
+async function loadWeatherCities() {
+  try {
+    const d = await api.weatherCities();
+    if (d && Array.isArray(d.provinces)) weatherProvinces = d.provinces;
+    if (d && d.names) weatherCityNames = { auto: '自动定位', ...d.names };
+  } catch { /* 用默认名兜底 */ }
+}
+
+/** 天气由主进程代发请求（渲染层 CSP 不允许连外网），失败时安静隐藏 */
+async function refreshWeather(force = false) {
+  const el = $('#weather');
+  if (!el || !api.weatherGet) return;
+  try {
+    const w = await api.weatherGet(state.settings.weatherCity || 'auto', force);
+    if (!w || !w.ok) { el.textContent = ''; el.classList.add('hidden'); return; }
+    el.innerHTML = `<span class="w-icon">${esc(w.icon)}</span>${esc(w.city)} ${esc(w.text)}<span class="w-temp">${w.temp}°</span>`;
+    el.title = `${w.city} ${w.text} ${w.temp}°C`;
+    el.classList.remove('hidden');
+  } catch {
+    el.textContent = ''; el.classList.add('hidden');
+  }
+}
+
+/* ------------------------- 家长守护（状态） ------------------------- */
+let guardState = {
+  enabled: false, unlocked: false, active: false,
+  restLeft: 0, wrongLeft: 0, cfg: null,
+};
+let lastWrongLeft = 0;
+
+function fmtMinSec(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  return `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
+}
+
+/** 守护开启且家长未临时放行时，是否要拦住某个动作 */
+function guardBlocked() { return !!(guardState.enabled && !guardState.unlocked); }
+
+function applyGuardUi() {
+  const blocked = guardBlocked();
+  const b = $('#btnAdd');
+  if (b) {
+    b.classList.toggle('hidden', blocked);
+    if (blocked && Focus.el === b) {
+      const first = Focus.firstInGrid();
+      if (first) Focus.set(first, { instant: true });
+    }
+  }
+}
+
+async function applyGuardState(st) {
+  if (!st) return;
+  const wasActive = guardState.active;
+  guardState = { ...guardState, ...st, cfg: st.cfg || guardState.cfg };
+  applyGuardUi();
+
+  const ov = $('#guardOverlay');
+  if (!ov) return;
+
+  if (guardState.active) {
+    ov.classList.remove('hidden');
+    // 休息页出现时收起普通弹层，避免两层叠在一起
+    if (!$('#overlay').classList.contains('hidden')) closeModal();
+    const left = $('#gRestLeft');
+    if (left) left.textContent = fmtMinSec(guardState.restLeft);
+    const quizBox = $('#gQuiz');
+    const quizOn = !guardState.cfg || guardState.cfg.quizEnabled !== false;
+    if (quizBox) quizBox.classList.toggle('hidden', !quizOn);
+    if (!wasActive || !guardQuizLoaded) {
+      if (quizOn) { guardQuizLoaded = true; await loadGuardQuestion(); }
+    }
+    if (quizOn) updateGuardWrong();
+  } else {
+    ov.classList.add('hidden');
+    guardQuizLoaded = false;
+    lastWrongLeft = 0;
+  }
+}
+
+let guardQuizLoaded = false;
+
+async function loadGuardQuestion() {
+  const q = $('#gQuestion'), opts = $('#gOptions'), msg = $('#gMsg');
+  if (!q || !opts) return;
+  const r = await api.guardQuestion();
+  if (!r || !r.ok) {
+    q.textContent = '题目加载中…';
+    opts.innerHTML = '';
+    if (msg) { msg.textContent = (r && r.error) || '稍后自动重试'; msg.className = 'guard-msg err'; }
+    return;
+  }
+  q.textContent = r.q;
+  opts.innerHTML = '';
+  r.options.forEach((text, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'guard-opt';
+    b.textContent = `${String.fromCharCode(65 + i)}. ${text}`;
+    b.addEventListener('click', () => submitGuardAnswer(i));
+    opts.appendChild(b);
+  });
+  lastWrongLeft = 0;
+  if (msg) { msg.textContent = '答对下面这道题，可以立即结束休息'; msg.className = 'guard-msg'; }
+}
+
+function updateGuardWrong() {
+  const left = guardState.wrongLeft || 0;
+  const msg = $('#gMsg');
+  const opts = $$('.guard-opt');
+  if (left > 0) {
+    if (msg) { msg.textContent = `答错啦，${left} 秒后自动换题`; msg.className = 'guard-msg err'; }
+    opts.forEach((b) => { b.disabled = true; });
+  } else if (lastWrongLeft > 0) {
+    // 主进程每秒推 wrongLeft，归零的这一拍自动换一道新题
+    loadGuardQuestion();
+  }
+  lastWrongLeft = left;
+}
+
+async function submitGuardAnswer(idx) {
+  if (!guardState.active || (guardState.wrongLeft || 0) > 0) return;
+  const r = await api.guardAnswer(idx);
+  const msg = $('#gMsg');
+  if (!r || !r.ok) {
+    if (msg) { msg.textContent = (r && r.error) || '提交失败，请重试'; msg.className = 'guard-msg err'; }
+    return;
+  }
+  if (r.correct) {
+    if (msg) { msg.textContent = '答对啦，休息结束 ✓'; msg.className = 'guard-msg ok'; }
+    guardState.wrongLeft = 0;
+  } else {
+    guardState.wrongLeft = r.left || 60;
+    lastWrongLeft = guardState.wrongLeft;
+    updateGuardWrong();
+  }
+}
+
 /* ------------------------- 设置应用 ------------------------- */
 /** 背景暗度档位: 0 原图 / 越暗文字越清楚 */
 const BG_DIM_STEPS = [0, 0.25, 0.45, 0.65];
@@ -515,6 +655,7 @@ async function launchItem(item) {
 }
 
 function askPower(kind) {
+  if (guardBlocked()) { toast('家长守护已开启，不能关机或重启', 'err', 2600); return; }
   const isRestart = kind === 'restart';
   openModal(`
     <div class="m-body" style="padding-top:26px">
@@ -548,8 +689,14 @@ function askPower(kind) {
 
 /* ------------------------- 弹层基础 ------------------------- */
 let modalEscHandler = null;
+let subPanelTimer = null; // 子面板的倒计时刷新，弹层重建/关闭时统一清掉
+
+function clearSubPanelTimer() {
+  if (subPanelTimer) { clearInterval(subPanelTimer); subPanelTimer = null; }
+}
 
 function openModal(html, opts = {}) {
+  clearSubPanelTimer();
   // 每次都重建节点: 彻底避免上一轮绑定的事件监听残留(否则会出现"关机会连着重启"之类的串味问题)
   const old = document.getElementById('modal');
   const modal = document.createElement('div');
@@ -577,6 +724,7 @@ function openModal(html, opts = {}) {
 }
 
 function closeModal() {
+  clearSubPanelTimer();
   overlayEl().classList.add('hidden');
   $('#modal').innerHTML = '';
   modalEscHandler = null;
@@ -595,6 +743,7 @@ function bindClose() {
    添加应用（手动指定程序）
    ========================================================= */
 async function openAdd() {
+  if (guardBlocked()) { toast('家长守护已开启，不能添加应用', 'err', 2600); return; }
   const modal = openModal(`
     <div class="m-head">
       <div>
@@ -859,6 +1008,7 @@ function bindFieldEvents(body, editing) {
 
 function openEdit(item) {
   if (!item) return;
+  if (guardBlocked()) { toast('家长守护已开启，不能修改应用', 'err', 2600); return; }
   openModal(`
     <div class="m-head">
       <div>
@@ -939,7 +1089,62 @@ function openEdit(item) {
 /* =========================================================
    设置
    ========================================================= */
+/** 家长守护开启时，每次进设置都要重新输入家长密码 */
 async function openSettings() {
+  let gs = null;
+  try { gs = await api.guardStatus(); } catch { /* 服务未就绪按未开启处理 */ }
+  if (gs && gs.cfg && gs.cfg.enabled) {
+    const ok = await promptGuardPassword();
+    if (!ok) return;
+    try { await applyGuardState(await api.guardStatus()); } catch { /* ignore */ }
+  }
+  renderSettings();
+}
+
+/** 密码输入框：验证在主进程做，明文不出渲染层，成功后临时放行 5 分钟 */
+function promptGuardPassword() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    openModal(`
+      <div class="m-head">
+        <div>
+          <div class="m-title">家长验证</div>
+          <div class="m-sub">家长守护已开启，进入设置需要输入家长守护密码</div>
+        </div>
+      </div>
+      <div class="m-body" style="padding-top:6px">
+        <div class="field">
+          <label class="field-label">家长守护密码</label>
+          <input class="input" id="gPwd" type="password" data-focusable autocomplete="off" placeholder="请输入密码" />
+        </div>
+        <div class="panel-status" id="gPwdErr" style="display:none"></div>
+      </div>
+      <div class="m-foot" style="justify-content:flex-end">
+        <button class="btn" id="gPwdCancel" data-focusable>取消</button>
+        <button class="btn btn-primary" id="gPwdOk" data-focusable data-autofocus>确定</button>
+      </div>
+    `, { tiny: true, autofocus: '#gPwd', onEsc: () => { closeModal(); done(false); } });
+
+    const input = $('#gPwd');
+    const err = $('#gPwdErr');
+    const showErr = (t) => { err.textContent = t; err.style.display = ''; };
+    const submit = async () => {
+      const v = input.value;
+      if (!v) { showErr('请输入密码'); return; }
+      let r = null;
+      try { r = await api.guardVerify(v); } catch (e) { showErr('验证失败：' + (e && e.message)); return; }
+      if (r && r.ok) { closeModal(); done(true); }
+      else { showErr((r && r.error) || '密码不正确'); input.value = ''; input.focus(); }
+    };
+    $('#gPwdOk').addEventListener('click', submit);
+    $('#gPwdCancel').addEventListener('click', () => { closeModal(); done(false); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+    input.focus();
+  });
+}
+
+function renderSettings() {
   const s = state.settings;
   const bg = bgSettings();
   openModal(`
@@ -1054,6 +1259,36 @@ async function openSettings() {
           <div class="setting-desc">丢掉自定义图片，回到自带的那张电视背景</div>
         </div>
         <div class="badge">恢复</div>
+      </div>
+
+      <div class="section-label" style="margin-top:14px;padding-left:14px">实用工具</div>
+      <div class="setting" data-focusable data-action="weatherCity">
+        <div class="setting-text">
+          <div class="setting-name">天气城市</div>
+          <div class="setting-desc">在主界面左上角时间后面显示实时天气</div>
+        </div>
+        <div class="badge" id="weatherCityBadge">${esc(weatherCityNames[s.weatherCity || 'auto'] || '自动定位')}</div>
+      </div>
+      <div class="setting" data-focusable data-action="customKeys">
+        <div class="setting-text">
+          <div class="setting-name">万能键</div>
+          <div class="setting-desc">给手机遥控添加自定义按键组合，最多 4 个</div>
+        </div>
+        <div class="badge">设置</div>
+      </div>
+      <div class="setting" data-focusable data-action="shutdownTimer">
+        <div class="setting-text">
+          <div class="setting-name">定时关机</div>
+          <div class="setting-desc">设置多少小时 / 分钟后自动关机，可随时取消</div>
+        </div>
+        <div class="badge">设置</div>
+      </div>
+      <div class="setting" data-focusable data-action="parental">
+        <div class="setting-text">
+          <div class="setting-name">家长守护模式</div>
+          <div class="setting-desc">限制添加应用与退出，定时强制休息，答题可提前解锁</div>
+        </div>
+        <div class="badge ${s.parental && s.parental.enabled ? 'done' : ''}">${s.parental && s.parental.enabled ? '已开启' : '关闭'}</div>
       </div>
 
       <div class="section-label" style="margin-top:14px;padding-left:14px">手机遥控</div>
@@ -1273,6 +1508,336 @@ async function clearBackground() {
   toast('已恢复默认壁纸', 'ok', 1500);
 }
 
+/* =========================================================
+   设置子面板：天气城市 / 定时关机 / 家长守护
+   ========================================================= */
+async function openWeatherPanel() {
+  await loadWeatherCities();
+  const cur = state.settings.weatherCity || 'auto';
+  // 反查当前 9 位编码属于哪个省，保证打开面板时两级下拉停在正确位置
+  let curProv = '';
+  for (const p of weatherProvinces) {
+    if (p.cities.some((c) => c.code === cur)) { curProv = p.name; break; }
+  }
+  const provOpts = [
+    `<option value="auto" ${cur === 'auto' ? 'selected' : ''}>自动定位（按网络 IP）</option>`,
+    ...weatherProvinces.map((p) =>
+      `<option value="${esc(p.name)}" ${p.name === curProv ? 'selected' : ''}>${esc(p.name)}</option>`),
+  ].join('');
+  const cityOptions = (provName, selected) => {
+    const p = weatherProvinces.find((x) => x.name === provName);
+    if (!p) return '';
+    return p.cities.map((c) =>
+      `<option value="${esc(c.code)}" ${c.code === selected ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  };
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">天气城市</div>
+        <div class="m-sub">显示在主界面左上角时间后面</div>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="panel-note">先选省份、再选城市，覆盖全国 34 个省级行政区、369 个城市。默认按网络 IP 自动定位；天气每 30 分钟刷新一次，取不到时自动隐藏，不影响其它功能。</div>
+      <div class="panel-row">
+        <span class="panel-label">省份</span>
+        <select class="input" id="wProvSel" data-focusable>${provOpts}</select>
+      </div>
+      <div class="panel-row" id="wCityRow" style="${cur === 'auto' ? 'display:none' : ''}">
+        <span class="panel-label">城市</span>
+        <select class="input" id="wCitySel" data-focusable>${cityOptions(curProv, cur)}</select>
+      </div>
+    </div>
+    <div class="m-foot" style="justify-content:flex-end">
+      <button class="btn" id="wBack" data-focusable>返回设置</button>
+      <button class="btn btn-primary" id="wSave" data-focusable data-autofocus>保存并刷新</button>
+    </div>
+  `, { narrow: true, autofocus: '#wProvSel' });
+
+  $('#wProvSel').addEventListener('change', () => {
+    const v = $('#wProvSel').value;
+    const row = $('#wCityRow');
+    if (v === 'auto') { row.style.display = 'none'; $('#wCitySel').innerHTML = ''; }
+    else { row.style.display = ''; $('#wCitySel').innerHTML = cityOptions(v, ''); }
+  });
+  $('#wBack').addEventListener('click', renderSettings);
+  $('#wSave').addEventListener('click', async () => {
+    const prov = $('#wProvSel').value;
+    const code = prov === 'auto' ? 'auto' : $('#wCitySel').value;
+    if (!code) { toast('请先选择城市', 'err'); return; }
+    state.settings.weatherCity = code;
+    await persist();
+    await refreshWeather(true);
+    toast('天气城市已更新', 'ok');
+    renderSettings();
+  });
+}
+
+/* ------------------------- 万能键 ------------------------- */
+/** 组合键文本 -> 键名数组： "Ctrl+Alt+F5" -> ['ctrl','alt','f5'] */
+const COMBO_ALIASES = {
+  control: 'ctrl', cmd: 'win', meta: 'win', windows: 'win', super: 'win',
+  escape: 'esc', return: 'enter', delete: 'del', spacebar: 'space',
+  pageup: 'pgup', pagedown: 'pgdn',
+  arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right',
+};
+const COMBO_MODS = ['ctrl', 'alt', 'shift', 'win'];
+const COMBO_KEYS = new Set([
+  ...COMBO_MODS, 'up', 'down', 'left', 'right', 'space', 'enter', 'esc', 'tab',
+  'backspace', 'del', 'insert', 'home', 'end', 'pgup', 'pgdn',
+  ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`),
+  ...Array.from({ length: 10 }, (_, i) => String(i)),
+  ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)),
+]);
+function parseComboText(text) {
+  return String(text || '').split('+').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    .map((s) => COMBO_ALIASES[s] || s);
+}
+
+async function openCustomKeysPanel() {
+  const saved = Array.isArray(state.settings.customKeys) ? state.settings.customKeys : [];
+  const rows = [];
+  for (let i = 0; i < 4; i++) {
+    const k = saved[i] || {};
+    const combo = Array.isArray(k.combo) ? k.combo : [];
+    rows.push(`
+      <div class="panel-row">
+        <span class="panel-label" style="flex:0 0 auto">键 ${i + 1}</span>
+        <input class="input" id="mkName${i}" data-focusable placeholder="显示名，如 全屏"
+               value="${esc(k.name || '')}" />
+        <input class="input" id="mkCombo${i}" data-focusable placeholder="组合，如 Ctrl+Alt+F5"
+               value="${esc(combo.join('+').toUpperCase())}" />
+      </div>
+    `);
+  }
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">万能键</div>
+        <div class="m-sub">手机遥控上会出现这些按钮，按下即向电脑发送组合键</div>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="panel-note">用 + 连接，例如 Ctrl+Alt+F5、Alt+Enter、Ctrl+Shift+Esc、Win+D。支持 Ctrl / Alt / Shift / Win 修饰键、A-Z、0-9、F1-F12、方向键、Enter、Space、Esc、Tab、Home、End、PageUp、PageDown 等；最多 4 个键。留空表示该槽位不启用，配置只保存在电脑端。</div>
+      ${rows.join('')}
+      <div class="panel-divider"></div>
+      <div class="panel-actions">
+        <button class="btn btn-primary" id="mkSave" data-focusable data-autofocus>保存设置</button>
+      </div>
+    </div>
+    <div class="m-foot" style="justify-content:flex-end">
+      <button class="btn" id="mkBack" data-focusable>返回设置</button>
+    </div>
+  `, { narrow: true, autofocus: '#mkName0' });
+
+  $('#mkBack').addEventListener('click', renderSettings);
+  $('#mkSave').addEventListener('click', async () => {
+    const out = [];
+    for (let i = 0; i < 4; i++) {
+      const name = $(`#mkName${i}`).value.trim().slice(0, 12);
+      const txt = $(`#mkCombo${i}`).value.trim();
+      if (!txt) { out.push({ name: '', combo: [] }); continue; }
+      const parts = parseComboText(txt);
+      if (parts.length > 4) { toast(`键 ${i + 1} 最多 4 个按键`, 'err', 3200); return; }
+      const bad = parts.find((p) => !COMBO_KEYS.has(p));
+      if (bad) { toast(`键 ${i + 1} 里有未知按键「${bad}」`, 'err', 3400); return; }
+      // 修饰键排前面，保证按下顺序正确（即使用户写成了 F5+Ctrl）
+      const mods = parts.filter((p) => COMBO_MODS.includes(p));
+      const mains = parts.filter((p) => !COMBO_MODS.includes(p));
+      if (!mains.length) { toast(`键 ${i + 1} 需要一个主键`, 'err'); return; }
+      out.push({ name: name || `万能键 ${i + 1}`, combo: [...mods, ...mains] });
+    }
+    state.settings.customKeys = out;
+    await persist();
+    toast('万能键已保存，手机遥控页会自动出现按钮', 'ok', 3000);
+    renderSettings();
+  });
+}
+
+async function openShutdownPanel() {
+  let st = { active: false, remaining: 0 };
+  try { st = await api.shutdownStatus(); } catch { /* ignore */ }
+  let deadline = st.active ? Date.now() + st.remaining * 1000 : 0;
+
+  const hours = Array.from({ length: 24 }, (_, i) =>
+    `<option value="${i}" ${i === 0 ? 'selected' : ''}>${i} 小时</option>`).join('');
+  const mins = Array.from({ length: 60 }, (_, i) =>
+    `<option value="${i}" ${i === 10 ? 'selected' : ''}>${i} 分钟</option>`).join('');
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">定时关机</div>
+        <div class="m-sub">到点自动关闭电脑，可随时取消</div>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="panel-note">Windows 上使用系统级定时关机：设置成功后即使退出本程序，到点依然会关机。取消请用下面的「取消定时关机」。</div>
+      <div class="panel-status" id="sdStatus"></div>
+      <div class="panel-row">
+        <span class="panel-label">在</span>
+        <select class="input" id="sdHour" data-focusable>${hours}</select>
+        <select class="input" id="sdMin" data-focusable>${mins}</select>
+        <span class="panel-label" style="flex:0 0 auto">后关机</span>
+      </div>
+      <div class="panel-grid">
+        <button class="btn" data-preset="0:10" data-focusable>10 分钟</button>
+        <button class="btn" data-preset="0:30" data-focusable>30 分钟</button>
+        <button class="btn" data-preset="1:0" data-focusable>1 小时</button>
+        <button class="btn" data-preset="2:0" data-focusable>2 小时</button>
+      </div>
+      <div class="panel-actions">
+        <button class="btn" id="sdCancel" data-focusable>取消定时关机</button>
+        <button class="btn btn-primary" id="sdStart" data-focusable data-autofocus>启动定时关机</button>
+      </div>
+    </div>
+    <div class="m-foot" style="justify-content:flex-end">
+      <button class="btn" id="sdBack" data-focusable>返回设置</button>
+    </div>
+  `, { narrow: true, autofocus: '#sdStart' });
+
+  const paint = () => {
+    const el = $('#sdStatus');
+    if (!el) return;
+    const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    if (left <= 0) { el.textContent = '当前没有定时关机任务'; return; }
+    const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+    el.textContent = `已设置 · 将在 ${h} 小时 ${m} 分 ${s} 秒后关机`;
+  };
+  paint();
+  subPanelTimer = setInterval(paint, 1000);
+
+  $$('[data-preset]').forEach((b) => b.addEventListener('click', () => {
+    const [h, m] = b.dataset.preset.split(':');
+    $('#sdHour').value = h; $('#sdMin').value = m;
+  }));
+  $('#sdStart').addEventListener('click', async () => {
+    const h = Number($('#sdHour').value), m = Number($('#sdMin').value);
+    let r;
+    try { r = await api.shutdownSchedule(h, m); } catch (e) { toast('设置失败：' + (e && e.message), 'err'); return; }
+    if (!r || !r.ok) { toast((r && r.error) || '设置失败', 'err', 3200); return; }
+    deadline = Date.now() + (h * 3600 + m * 60) * 1000;
+    paint();
+    toast(`已设置 ${h} 小时 ${m} 分钟后关机`, 'ok', 3000);
+  });
+  $('#sdCancel').addEventListener('click', async () => {
+    await api.shutdownCancel();
+    deadline = 0;
+    paint();
+    toast('已取消定时关机', 'ok');
+  });
+  $('#sdBack').addEventListener('click', renderSettings);
+}
+
+async function openGuardPanel() {
+  let st = { cfg: null };
+  let info = { source: '内置题库', count: 0, custom: false };
+  try { st = await api.guardStatus(); } catch { /* ignore */ }
+  try { info = await api.guardQuizInfo(); } catch { /* ignore */ }
+  const cfg = st.cfg || { enabled: false, hasPassword: false, intervalMin: 60, restMin: 10, quizEnabled: true, lockdown: false };
+
+  const intervalVals = [15, 30, 45, 60, 90, 120];
+  if (!intervalVals.includes(Number(cfg.intervalMin))) intervalVals.unshift(Number(cfg.intervalMin));
+  const restVals = [5, 10, 15, 20, 30, 60];
+  if (!restVals.includes(Number(cfg.restMin))) restVals.unshift(Number(cfg.restMin));
+  const intervalOpts = intervalVals.map((v) =>
+    `<option value="${v}" ${Number(cfg.intervalMin) === v ? 'selected' : ''}>${v} 分钟</option>`).join('');
+  const restOpts = restVals.map((v) =>
+    `<option value="${v}" ${Number(cfg.restMin) === v ? 'selected' : ''}>${v} 分钟</option>`).join('');
+
+  openModal(`
+    <div class="m-head">
+      <div>
+        <div class="m-title">家长守护模式</div>
+        <div class="m-sub">限制孩子随意改动和退出，定时提醒休息</div>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="panel-note">开启后：不能添加应用、不能切回电脑桌面、不能退出启动器或关机；每次进入设置都要输入家长密码。使用时长按现实时间累计并落盘，重启电脑不会清零（关机期间不计时），到达设定时长强制休息，答对题目可立即结束休息；答错一次需等待 1 分钟自动换题。<br/><b>轻量加固</b>：额外禁用任务管理器与 Win 键、窗口被结束后自动拉起、检测到桌面露出时把启动台拉回前台；关闭守护或退出软件会自动恢复系统设置。注意：Ctrl+Alt+Del、长按电源键、管理员强制结束属于系统级手段，任何普通应用都无法阻止。</div>
+      <div class="panel-status">当前题库：${esc(info.source)} · ${info.count} 题${info.custom ? '（自导入）' : '（程序内置）'}</div>
+      <div class="panel-row">
+        <span class="panel-label">守护状态</span>
+        <select class="input" id="gEnabled" data-focusable>
+          <option value="off" ${!cfg.enabled ? 'selected' : ''}>关闭</option>
+          <option value="on" ${cfg.enabled ? 'selected' : ''}>开启</option>
+        </select>
+      </div>
+      <div class="panel-row">
+        <span class="panel-label">家长密码</span>
+        <input class="input" id="gNewPwd" type="password" data-focusable autocomplete="new-password"
+               placeholder="${cfg.hasPassword ? '留空表示不修改' : '至少 4 位，开启时必填'}" />
+      </div>
+      <div class="panel-row">
+        <span class="panel-label">每隔</span>
+        <select class="input" id="gInterval" data-focusable>${intervalOpts}</select>
+        <span class="panel-label" style="flex:0 0 auto">强制休息</span>
+        <select class="input" id="gRest" data-focusable>${restOpts}</select>
+      </div>
+      <div class="panel-row">
+        <span class="panel-label">答题解锁</span>
+        <select class="input" id="gQuizOn" data-focusable>
+          <option value="on" ${cfg.quizEnabled !== false ? 'selected' : ''}>允许（答对立即结束休息）</option>
+          <option value="off" ${cfg.quizEnabled === false ? 'selected' : ''}>关闭（只能等休息结束）</option>
+        </select>
+      </div>
+      <div class="panel-row">
+        <span class="panel-label">轻量加固</span>
+        <select class="input" id="gLockdown" data-focusable>
+          <option value="off" ${!cfg.lockdown ? 'selected' : ''}>关闭（只拦应用内操作）</option>
+          <option value="on" ${cfg.lockdown ? 'selected' : ''}>开启（防切桌面 + 被关闭后自动恢复）</option>
+        </select>
+      </div>
+      <div class="panel-divider"></div>
+      <div class="panel-actions">
+        <button class="btn" id="gImport" data-focusable>导入题库</button>
+        <button class="btn" id="gSample" data-focusable>导出样本题库</button>
+        <button class="btn btn-primary" id="gSave" data-focusable data-autofocus>保存设置</button>
+      </div>
+    </div>
+    <div class="m-foot" style="justify-content:flex-end">
+      <button class="btn" id="gBack" data-focusable>返回设置</button>
+    </div>
+  `, { narrow: true, autofocus: '#gEnabled' });
+
+  $('#gSave').addEventListener('click', async () => {
+    const enabled = $('#gEnabled').value === 'on';
+    const password = $('#gNewPwd').value.trim();
+    if (enabled && !cfg.hasPassword && !password) {
+      toast('首次开启请先设置家长守护密码', 'err', 3200); return;
+    }
+    const patch = {
+      enabled,
+      intervalMin: Number($('#gInterval').value),
+      restMin: Number($('#gRest').value),
+      quizEnabled: $('#gQuizOn').value === 'on',
+      lockdown: $('#gLockdown').value === 'on',
+    };
+    if (password) patch.password = password;
+    let r;
+    try { r = await api.guardConfigure(patch); } catch (e) { toast('保存失败：' + (e && e.message), 'err'); return; }
+    if (!r || !r.ok) { toast((r && r.error) || '保存失败', 'err', 3400); return; }
+    try { await applyGuardState(await api.guardStatus()); } catch { /* ignore */ }
+    toast(enabled ? '家长守护已开启' : '家长守护已关闭', 'ok', 2600);
+    renderSettings();
+  });
+  $('#gImport').addEventListener('click', async () => {
+    const r = await api.guardQuizImport();
+    if (!r) return;
+    if (r.canceled) return;
+    if (!r.ok) { toast('导入失败：' + (r.error || '格式不对'), 'err', 4000); return; }
+    toast(`题库导入成功，共 ${r.count} 题`, 'ok', 2600);
+    openGuardPanel();
+  });
+  $('#gSample').addEventListener('click', async () => {
+    const r = await api.guardQuizExportSample();
+    if (r && r.ok) toast('样本题库已导出到数据目录', 'ok', 3200);
+    else toast('导出失败：' + ((r && r.error) || '未知原因'), 'err');
+  });
+  $('#gBack').addEventListener('click', renderSettings);
+}
+
 async function runSettingAction(action) {
   if (action === 'pickBg') { await pickBackground(); return; }
   if (action === 'clearBg') { await clearBackground(); return; }
@@ -1284,7 +1849,14 @@ async function runSettingAction(action) {
   }
   if (action === 'about') { await openAbout(); return; }
   if (action === 'phoneRemote') { await openPhoneRemote(); return; }
-  if (action === 'quit') { await persist(); api.quit(); }
+  if (action === 'weatherCity') { await openWeatherPanel(); return; }
+  if (action === 'customKeys') { await openCustomKeysPanel(); return; }
+  if (action === 'shutdownTimer') { await openShutdownPanel(); return; }
+  if (action === 'parental') { await openGuardPanel(); return; }
+  if (action === 'quit') {
+    if (guardBlocked()) { toast('家长守护已开启，不能退出启动器', 'err'); return; }
+    await persist(); api.quit();
+  }
 }
 
 /* =========================================================
@@ -1507,11 +2079,9 @@ async function openAbout() {
       <button class="btn btn-icon-only" data-close data-focusable title="关闭">✕</button>
     </div>
     <div class="m-body" style="text-align:center">
-      <div style="width:76px;height:76px;border-radius:20px;margin:6px auto 14px;
-                  background:linear-gradient(145deg,#6d8bff,#8a6dff);
-                  box-shadow:0 10px 30px rgba(109,139,255,.4);display:flex;align-items:center;justify-content:center">
-        <svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:#fff;margin-left:3px"><path d="M8 5v14l11-7z"/></svg>
-      </div>
+      <img src="assets/icon.png" alt="影游快启" draggable="false"
+           style="width:calc(96px * var(--fs,1));height:calc(96px * var(--fs,1));object-fit:contain;
+                  margin:2px auto 12px;display:block;filter:drop-shadow(0 8px 26px rgba(109,139,255,.35))" />
       <div style="font-size:calc(20px * var(--fs,1));font-weight:700;letter-spacing:1px">影游快启</div>
       <div style="font-size:calc(12px * var(--fs,1));color:var(--txt-dim);margin-top:6px">当前版本 v${esc(ver)}</div>
 
@@ -1727,11 +2297,14 @@ document.addEventListener('focusin', (e) => {
 });
 
 function handleBack() {
+  // 强制休息中：任何"返回 / Esc"都不响应，休想关掉休息页
+  if (guardState.active) return;
   if (isOverlayOpen()) {
     if (modalEscHandler) { modalEscHandler(); return; }
     closeModal();
     return;
   }
+  if (guardBlocked()) { toast('家长守护已开启，不能退出启动器', 'err', 2600); return; }
   const now = Date.now();
   if (now - lastEscAt < 1800) { api.quit(); return; }
   lastEscAt = now;
@@ -1835,6 +2408,7 @@ function removeFocused() {
 }
 
 function askRemove(item) {
+  if (guardBlocked()) { toast('家长守护已开启，不能移除应用', 'err', 2600); return; }
   openModal(`
     <div class="m-body" style="padding-top:26px">
       <div class="confirm-title">移除「${esc(clampText(item.name, 24))}」？</div>
@@ -1859,6 +2433,9 @@ function askRemove(item) {
 }
 
 async function toggleFullscreen() {
+  if (guardBlocked() && state.isFullscreen) {
+    toast('家长守护已开启，不能退出全屏', 'err', 2600); return;
+  }
   state.isFullscreen = !state.isFullscreen;
   await api.setFullscreen(state.isFullscreen);
   state.settings.fullscreen = state.isFullscreen;
@@ -1979,9 +2556,18 @@ async function repairIcons() {
     toast('初始化失败: ' + e.message, 'err', 4000);
   }
 
+  await loadWeatherCities();
   applySettings();
+  applyGuardUi();
   updateClock();
   setInterval(updateClock, 1000);
+  refreshWeather();
+  setInterval(() => refreshWeather(), 30 * 60 * 1000);
+
+  // 家长守护：主进程每秒推一次状态，界面据此显示 / 隐藏强制休息页
+  if (api && api.onGuardState) api.onGuardState(applyGuardState);
+  if (api && api.guardStatus) api.guardStatus().then(applyGuardState).catch(() => {});
+
   // 窗口被应用完全遮挡时定时器会被节流, 重新可见时补一次, 免得时钟停在旧时间
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) updateClock();

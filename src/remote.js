@@ -30,10 +30,12 @@ const ALLOWED = new Set([
   'playpause', 'ffwd', 'rew', 'fullscreen', 'nextep',
   // 鼠标 / 键盘模拟（注入到前台程序）
   'mmove', 'mclick', 'mrclick', 'mdown', 'mup', 'mwheel', 'type', 'key',
+  // 万能键：手机只传槽位下标，具体组合由电脑端配置决定
+  'macro',
 ]);
 
 /** 需要携带参数的指令；其余指令忽略 payload，避免夹带 */
-const PARAM_ACTIONS = new Set(['mmove', 'mwheel', 'type', 'key']);
+const PARAM_ACTIONS = new Set(['mmove', 'mwheel', 'type', 'key', 'macro']);
 
 /** key 指令允许的键名（映射到 Windows 虚拟键；也可直接传 1-254 的数字） */
 const KEY_NAMES = new Set([
@@ -63,6 +65,11 @@ function sanitizeParams(action, payload) {
     case 'type': {
       const text = typeof p.text === 'string' ? p.text.slice(0, 500) : '';
       return { text };
+    }
+    case 'macro': {
+      const i = Number(p.index);
+      if (!Number.isInteger(i) || i < 0 || i > 3) return null;
+      return { index: i };
     }
     case 'key': {
       const raw = p.key;
@@ -132,6 +139,8 @@ class RemoteService {
     this.launchSeq = 0;
     // 启动台是否在前台的状态提供者（由主进程注入，remote.js 本身不依赖 Electron）
     this.frontProvider = null;
+    // 手机页动态配置（万能键等）提供者，随 /ping 下发
+    this.configProvider = null;
   }
 
   /** 通知手机页"有新程序被打开"（由主进程 afterLaunch 调用） */
@@ -139,6 +148,9 @@ class RemoteService {
 
   /** 注入"启动台是否在前台"的查询函数，供 /ping 回显给手机页 */
   setFrontProvider(fn) { this.frontProvider = typeof fn === 'function' ? fn : null; }
+
+  /** 注入手机页配置查询函数（只下发显示名，不下发具体按键组合） */
+  setConfigProvider(fn) { this.configProvider = typeof fn === 'function' ? fn : null; }
 
   get running() { return !!this.server; }
 
@@ -170,8 +182,14 @@ class RemoteService {
       // 健康检查：手机进来先探一下，回显 token 是否有效、是否有新程序被打开、启动台是否在前台
       if (req.method === 'GET' && url.pathname === '/ping') {
         let front = false;
+        let config = {};
         try { front = self.frontProvider ? !!self.frontProvider() : false; } catch { /* ignore */ }
-        return json(res, 200, { ok: true, app: 'LaunchPlay', running: true, launchSeq: self.launchSeq, front });
+        try { config = self.configProvider ? self.configProvider() : {}; } catch { /* ignore */ }
+        return json(res, 200, {
+          ok: true, app: 'LaunchPlay', running: true,
+          launchSeq: self.launchSeq, front,
+          ...(config && typeof config === 'object' ? config : {}),
+        });
       }
 
       // 指令入口

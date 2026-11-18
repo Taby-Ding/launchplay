@@ -8,88 +8,91 @@
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     :root {
+      --rs: 1; /* 大字版基准；标准版 0.75 = 最初版 1.5 倍 */
       --bg: #0b1020; --surface: #161e33; --surface-2: #1e2842;
       --line: #2a3452; --text: #eef2ff; --muted: #93a0c4;
       --accent: #6d8bff; --danger: #ff6b6b; --ok: #43d9a3;
     }
+    html[data-size="standard"] { --rs: 0.75; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
       background: var(--bg); color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       display: flex; flex-direction: column; align-items: center;
-      padding: calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 18px);
+      padding: calc(env(safe-area-inset-top) + calc(14px * var(--rs, 1))) calc(16px * var(--rs, 1)) calc(env(safe-area-inset-bottom) + calc(18px * var(--rs, 1)));
       min-height: 100%; user-select: none; -webkit-user-select: none;
       overscroll-behavior: none;
     }
-    .wrap { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+    .wrap { width: 100%; max-width: calc(560px * var(--rs, 1)); display: flex; flex-direction: column; gap: calc(18px * var(--rs, 1)); flex: 1; }
 
     header { text-align: center; }
-    .brand { font-size: 17px; font-weight: 600; letter-spacing: .5px; }
-    .brand small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+    .brand { font-size: calc(34px * var(--rs, 1)); font-weight: 600; letter-spacing: calc(.5px * var(--rs, 1)); }
+    .brand small { font-weight: 400; color: var(--muted); font-size: calc(24px * var(--rs, 1)); margin-left: calc(6px * var(--rs, 1)); }
     #status {
-      margin-top: 6px; font-size: 12px; color: var(--muted);
-      display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+      margin-top: calc(6px * var(--rs, 1)); font-size: calc(24px * var(--rs, 1)); color: var(--muted);
+      display: inline-flex; align-items: center; gap: calc(6px * var(--rs, 1)); justify-content: center;
     }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-    .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(67,217,163,.16); }
+    .dot { width: calc(7px * var(--rs, 1)); height: calc(7px * var(--rs, 1)); border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--ok); box-shadow: 0 0 0 calc(3px * var(--rs, 1)) rgba(67,217,163,.16); }
     .dot.err { background: var(--danger); }
 
     .card {
       background: var(--surface); border: 1px solid var(--line);
-      border-radius: 18px; padding: 14px;
+      border-radius: calc(24px * var(--rs, 1)); padding: calc(20px * var(--rs, 1));
     }
-    .card-title { font-size: 12px; color: var(--muted); margin: 0 0 10px 4px; }
-    .card-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 10px 2px 0; opacity: .85; }
+    .card-title { font-size: calc(24px * var(--rs, 1)); color: var(--muted); margin: 0 0 calc(14px * var(--rs, 1)) calc(4px * var(--rs, 1)); }
+    .card-note { font-size: calc(22px * var(--rs, 1)); color: var(--muted); line-height: 1.6; margin: calc(10px * var(--rs, 1)) calc(2px * var(--rs, 1)) 0; opacity: .85; }
 
     /* 方向键 + 确定 */
     .dpad {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      grid-template-rows: repeat(3, 76px);
-      gap: 8px;
+      grid-template-rows: repeat(3, calc(112px * var(--rs, 1)));
+      gap: calc(10px * var(--rs, 1));
     }
     .key {
       border: 1px solid var(--line); background: var(--surface-2);
-      color: var(--text); border-radius: 16px; font-size: 15px; font-weight: 500;
+      color: var(--text); border-radius: calc(22px * var(--rs, 1)); font-size: calc(30px * var(--rs, 1)); font-weight: 500;
       display: flex; align-items: center; justify-content: center;
       cursor: pointer; transition: transform .06s, background .12s, border-color .12s;
       touch-action: manipulation;
     }
     .key:active, .key.press { transform: scale(.94); background: var(--accent); border-color: var(--accent); color: #fff; }
-    .key svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .key svg { width: calc(44px * var(--rs, 1)); height: calc(44px * var(--rs, 1)); fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
     .k-up { grid-area: 1 / 2; } .k-left { grid-area: 2 / 1; }
-    .k-ok { grid-area: 2 / 2; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 15px; }
+    .k-ok { grid-area: 2 / 2; background: var(--accent); border-color: var(--accent); color: #fff; font-size: calc(30px * var(--rs, 1)); }
     .k-right { grid-area: 2 / 3; } .k-down { grid-area: 3 / 2; }
 
-    .row { display: grid; gap: 8px; }
+    .row { display: grid; gap: calc(10px * var(--rs, 1)); }
     .row.two { grid-template-columns: repeat(2, 1fr); }
-    .row.three { grid-template-columns: repeat(3, 1fr); }
-    .row.four { grid-template-columns: repeat(4, 1fr); }
+    .row.three { grid-template-columns: repeat(2, 1fr); }
+    .row.three > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .row.four { grid-template-columns: repeat(2, 1fr); }
     .btn {
       border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-      border-radius: 14px; padding: 13px 6px; font-size: 13px; cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      border-radius: calc(18px * var(--rs, 1)); padding: calc(16px * var(--rs, 1)) calc(8px * var(--rs, 1)); font-size: calc(26px * var(--rs, 1)); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: calc(4px * var(--rs, 1));
       transition: transform .06s, background .12s, border-color .12s; touch-action: manipulation;
     }
     .btn:active, .btn.press { transform: scale(.95); background: var(--accent); border-color: var(--accent); }
-    .btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .btn svg { width: calc(36px * var(--rs, 1)); height: calc(36px * var(--rs, 1)); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .btn.danger { color: var(--danger); }
     .btn.danger:active { background: var(--danger); border-color: var(--danger); color: #fff; }
 
     /* 触摸板 */
     .touchpad {
-      position: relative; height: 210px; border-radius: 18px;
+      position: relative; height: calc(280px * var(--rs, 1)); border-radius: calc(24px * var(--rs, 1));
       background: radial-gradient(ellipse at 50% 45%, var(--surface-2), var(--bg));
       border: 1px dashed var(--line); overflow: hidden;
       touch-action: none; -webkit-user-select: none; user-select: none;
     }
     .tp-hint {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-size: 12px; color: var(--muted); pointer-events: none; text-align: center; padding: 0 16px;
+      font-size: calc(24px * var(--rs, 1)); color: var(--muted); pointer-events: none; text-align: center; padding: 0 calc(16px * var(--rs, 1));
     }
     .tp-dot {
-      position: absolute; width: 40px; height: 40px; left: 50%; top: 50%;
-      margin: -20px 0 0 -20px; border-radius: 50%;
+      position: absolute; width: calc(56px * var(--rs, 1)); height: calc(56px * var(--rs, 1)); left: 50%; top: 50%;
+      margin: -calc(28px * var(--rs, 1)) 0 0 -calc(28px * var(--rs, 1)); border-radius: 50%;
       background: rgba(109,139,255,.25); border: 1px solid var(--accent);
       opacity: 0; transition: opacity .2s; pointer-events: none;
     }
@@ -97,53 +100,66 @@
     .touchpad.press .tp-dot { background: rgba(109,139,255,.5); transform: scale(.8); }
 
     /* 键盘输入行 */
-    .kb-input-row { display: flex; gap: 8px; }
+    .kb-input-row { display: flex; gap: calc(8px * var(--rs, 1)); }
     .kb-input {
       flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg);
-      color: var(--text); border-radius: 12px; padding: 12px 12px; font-size: 14px;
+      color: var(--text); border-radius: calc(16px * var(--rs, 1)); padding: calc(14px * var(--rs, 1)) calc(16px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1));
       -webkit-user-select: text; user-select: text;
     }
     .kb-input:focus { outline: none; border-color: var(--accent); }
     .kb-send {
       border: 1px solid var(--accent); background: var(--accent); color: #fff;
-      border-radius: 12px; padding: 0 18px; font-size: 14px; cursor: pointer;
+      border-radius: calc(16px * var(--rs, 1)); padding: 0 calc(24px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1)); cursor: pointer;
     }
     .kb-send:active { transform: scale(.96); }
 
-    .foot { text-align: center; font-size: 11px; color: var(--muted); line-height: 1.7; padding-bottom: 6px; }
+    .foot { text-align: center; font-size: calc(22px * var(--rs, 1)); color: var(--muted); line-height: 1.7; padding-bottom: calc(10px * var(--rs, 1)); }
 
     /* 确认弹层（关机/重启/关闭程序） */
     .confirm {
       position: fixed; inset: 0; background: rgba(4,7,16,.82);
-      display: none; align-items: center; justify-content: center; padding: 24px; z-index: 10;
-      backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center; padding: calc(24px * var(--rs, 1)); z-index: 10;
+      backdrop-filter: blur(calc(4px * var(--rs, 1)));
     }
     .confirm.show { display: flex; }
     .confirm-box {
-      background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
-      padding: 22px 20px 18px; width: 100%; max-width: 320px; text-align: center;
+      background: var(--surface); border: 1px solid var(--line); border-radius: calc(28px * var(--rs, 1));
+      padding: calc(30px * var(--rs, 1)) calc(26px * var(--rs, 1)) calc(24px * var(--rs, 1)); width: 100%; max-width: calc(480px * var(--rs, 1)); text-align: center;
     }
-    .confirm-box h3 { margin: 0 0 8px; font-size: 17px; }
-    .confirm-box p { margin: 0 0 18px; font-size: 13px; color: var(--muted); line-height: 1.6; }
-    .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .confirm-box h3 { margin: 0 0 calc(12px * var(--rs, 1)); font-size: calc(34px * var(--rs, 1)); }
+    .confirm-box p { margin: 0 0 calc(26px * var(--rs, 1)); font-size: calc(26px * var(--rs, 1)); color: var(--muted); line-height: 1.6; }
+    .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: calc(10px * var(--rs, 1)); }
     .confirm-actions button {
       border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-      border-radius: 12px; padding: 12px; font-size: 14px; cursor: pointer;
+      border-radius: calc(16px * var(--rs, 1)); padding: calc(16px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1)); cursor: pointer;
     }
     .confirm-actions .go { background: var(--danger); border-color: var(--danger); color: #fff; }
 
     .err-banner {
       display: none; background: rgba(255,107,107,.12); border: 1px solid var(--danger);
-      color: #ffb3b3; border-radius: 12px; padding: 10px 12px; font-size: 12px; line-height: 1.6;
+      color: #ffb3b3; border-radius: calc(12px * var(--rs, 1)); padding: calc(10px * var(--rs, 1)) calc(12px * var(--rs, 1)); font-size: calc(24px * var(--rs, 1)); line-height: 1.6;
     }
     .err-banner.show { display: block; }
-  </style>
+  
+    /* 字号切换按钮与万能键 */
+    .size-toggle {
+      margin-top: calc(12px * var(--rs, 1));
+      border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+      border-radius: calc(999px * var(--rs, 1)); cursor: pointer;
+      padding: calc(8px * var(--rs, 1)) calc(20px * var(--rs, 1));
+      font-size: calc(22px * var(--rs, 1)); min-height: 40px;
+      touch-action: manipulation;
+    }
+    .size-toggle:active { background: var(--accent); color: #fff; }
+    .macro-empty { font-size: calc(22px * var(--rs, 1)); color: var(--muted); }
+</style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div class="brand">影游快启 <small>手机遥控</small></div>
       <div id="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></div>
+      <button class="size-toggle" id="sizeBtn" type="button">大字版 · 切标准版</button>
     </header>
 
     <div class="err-banner" id="errBanner"></div>
@@ -170,7 +186,7 @@
     <div class="card">
       <p class="card-title">音量与播放</p>
       <div class="row four">
-        <div class="btn" data-action="voldown" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>音量−</div>
+        <div class="btn" data-action="voldown" role="button"><svg class="ic-voldown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h3.8l4.7-3.9v13.8L6.8 15H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" style="fill:currentColor;stroke:none"/><path d="M16.4 9.1a4.3 4.3 0 0 1 0 5.8" style="fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round"/></svg>音量−</div>
         <div class="btn" data-action="mute" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>静音</div>
         <div class="btn" data-action="volup" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>音量+</div>
         <div class="btn" data-action="play" role="button"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>播放</div>
@@ -182,7 +198,7 @@
     </div>
 
     <div class="card" id="cardPlay">
-      <p class="card-title">播放遥控 · 直接控制正在看的视频（爱奇艺 / 腾讯视频等）</p>
+      <p class="card-title">播放遥控 · 直接控制正在看的视频</p>
       <div class="row four">
         <div class="btn" data-action="rew" role="button"><svg viewBox="0 0 24 24"><path d="M11 6L5 12l6 6M19 6l-6 6 6 6"/></svg>快退</div>
         <div class="btn" data-action="playpause" role="button"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>播放/暂停</div>
@@ -190,12 +206,16 @@
         <div class="btn" data-action="fullscreen" role="button"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>全屏</div>
       </div>
       <div class="row four" style="margin-top:8px">
-        <div class="btn" data-action="voldown" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>音量−</div>
+        <div class="btn" data-action="voldown" role="button"><svg class="ic-voldown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h3.8l4.7-3.9v13.8L6.8 15H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" style="fill:currentColor;stroke:none"/><path d="M16.4 9.1a4.3 4.3 0 0 1 0 5.8" style="fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round"/></svg>音量−</div>
         <div class="btn" data-action="volup" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>音量+</div>
         <div class="btn" data-action="mute" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>静音</div>
         <div class="btn" data-action="nextep" role="button"><svg viewBox="0 0 24 24"><path d="M5 5l10 7-10 7z"/><path d="M19 5v14"/></svg>下一集</div>
       </div>
-      <p class="card-note">小提示：看视频时上方导航区的 ▲ ▼ ◀ ▶ 会自动变成音量 / 快退快进（启动台收起时生效），无需再切换。</p>
+    </div>
+
+    <div class="card" id="cardMacro" style="display:none">
+      <p class="card-title">万能键 · 在电脑端设置里自定义</p>
+      <div class="row four" id="macroRow"></div>
     </div>
 
     <div class="card">
@@ -266,6 +286,47 @@
       var confirmedAction = null;
       var busy = false;
       var failCount = 0;
+
+      // 字号：大字版 = 当前尺寸（最初版 2 倍）；标准版 = 最初版 1.5 倍，即大字版的 0.75。
+      // 切换 --rs 后字号、间距、按钮高度、触摸板、图标一起等比缩放；每台手机各自记住选择。
+      var SIZE_KEY = 'lp_remote_size';
+      function applySize(mode) {
+        var std = mode === 'standard';
+        document.documentElement.setAttribute('data-size', std ? 'standard' : 'large');
+        var btn = document.getElementById('sizeBtn');
+        if (btn) btn.textContent = std ? '标准版 · 切大字版' : '大字版 · 切标准版';
+        try { localStorage.setItem(SIZE_KEY, std ? 'standard' : 'large'); } catch (e) {}
+      }
+      var savedSize = 'large';
+      try { savedSize = localStorage.getItem(SIZE_KEY) || 'large'; } catch (e) {}
+      applySize(savedSize);
+      document.getElementById('sizeBtn').addEventListener('click', function () {
+        var std = document.documentElement.getAttribute('data-size') === 'standard';
+        applySize(std ? 'large' : 'standard');
+      });
+
+      // 万能键：手机页只显示名字，具体按键组合保存在电脑端，不下发到手机
+      var macroSig = null;
+      function renderMacros(list) {
+        var card = document.getElementById('cardMacro');
+        var row = document.getElementById('macroRow');
+        if (!card || !row) return;
+        var arr = Array.isArray(list) ? list : [];
+        var sig = arr.map(function (k) { return (k && k.index) + ':' + (k && k.name); }).join('|');
+        if (sig === macroSig) return;
+        macroSig = sig;
+        row.innerHTML = '';
+        if (!arr.length) { card.style.display = 'none'; return; }
+        arr.forEach(function (k, i) {
+          var d = document.createElement('div');
+          d.className = 'btn';
+          d.setAttribute('role', 'button');
+          d.textContent = (k && k.name) || ('万能键 ' + (i + 1));
+          d.addEventListener('click', function () { flash(d); buzz(); send('macro', { index: (k && typeof k.index === 'number') ? k.index : i }); });
+          row.appendChild(d);
+        });
+        card.style.display = '';
+      }
 
       function setStatus(state, text) {
         dot.className = 'dot' + (state === 'on' ? ' on' : state === 'err' ? ' err' : '');
@@ -484,6 +545,7 @@
           return r.json().catch(function () { return null; });
         }).then(function (j) {
           if (!j) return;
+          renderMacros(j.customKeys);
           // 先处理"打开程序 -> 播放遥控"
           if (typeof j.launchSeq === 'number') {
             if (lastLaunchSeq === null) lastLaunchSeq = j.launchSeq;

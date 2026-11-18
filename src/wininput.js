@@ -21,7 +21,7 @@
  *   {id, cmd:'pos'}             查询光标位置
  * 响应：OK <id> [数据] / ERR <id> <原因>；初始化完成后先输出 READY。
  *
- * 所有操作发给「当前前台窗口」。爱奇艺等播放器全屏时即为前台，方向键
+ * 所有操作发给「当前前台窗口」。影音软件全屏时即为前台，方向键
  * 对应音量/快进、空格对应播放暂停、Esc 退出全屏、F 切换全屏——这正是
  * 自动跟随遥控依赖的通用快捷键约定。
  */
@@ -33,12 +33,18 @@ const { WIN } = require('./platform');
 const VK = {
   up: 0x26, down: 0x28, left: 0x25, right: 0x27,
   space: 0x20, enter: 0x0D, esc: 0x1B, tab: 0x09,
-  backspace: 0x08, del: 0x2E,
-  f: 0x46, f4: 0x73, f11: 0x7A,
+  backspace: 0x08, del: 0x2E, insert: 0x2D,
+  home: 0x24, end: 0x23, pgup: 0x21, pgdn: 0x22,
+  f: 0x46, // 字母 F 键（兼容旧写法）
   volup: 0xAF, voldown: 0xAE, mute: 0xAD,
   next: 0xB0, prev: 0xB1, play: 0xB3,
-  ctrl: 0x11, shift: 0x10, alt: 0x12,
+  ctrl: 0x11, shift: 0x10, alt: 0x12, win: 0x5B,
 };
+// 万能键需要「任意组合」：补齐 F1-F12、0-9、A-Z。
+// 注意 combo() 最多接受 4 个键，所以设置面板里限制 3 个修饰键 + 1 个主键。
+for (let i = 1; i <= 12; i++) VK[`f${i}`] = 0x6F + i;
+for (let i = 0; i < 10; i++) VK[String(i)] = 0x30 + i;
+for (let i = 0; i < 26; i++) VK[String.fromCharCode(97 + i)] = 0x41 + i;
 
 /** PowerShell 常驻脚本（模板字符串内无 ${} 与反引号，PowerShell 的 $x 原样保留） */
 const PS_SCRIPT = `
