@@ -10,16 +10,24 @@
  * 为什么不用外部 .ps1 文件：
  *   之前项目踩过 .ps1 被安全策略拦截的坑，这里脚本内联在内存里，不落盘。
  *
- * 指令（JSON 行，Node → PowerShell）：
- *   {id, cmd:'key', vk}         按下并抬起一个虚拟键
- *   {id, cmd:'keydown'|'keyup', vk}   单独按下/抬起（组合键用）
- *   {id, cmd:'type', text:<base64>}   以 Unicode 输入文本（支持中文，不碰剪贴板）
- *   {id, cmd:'move', dx, dy}    相对移动鼠标
- *   {id, cmd:'moveto', x, y}    绝对移动鼠标
- *   {id, cmd:'click'|'rclick'|'mdown'|'mup'}  左/右键
- *   {id, cmd:'wheel', delta}    滚轮（±120 为一格）
- *   {id, cmd:'pos'}             查询光标位置
+ * 指令（制表符分隔，Node → PowerShell）：
+ *   <id>\t<cmd>\t<参数1>\t<参数2>
+ *   key / keydown / keyup   参数1 = 虚拟键码
+ *   combo                   参数1 = 逗号分隔的虚拟键码（最多 4 个）
+ *   type                    参数1 = UTF-8 文本的 base64（支持中文，不碰剪贴板）
+ *   move                    参数1/2 = dx / dy（相对）
+ *   moveto                  参数1/2 = x / y（绝对）
+ *   wheel                   参数1 = delta（±120 为一格）
+ *   click / rclick / mdown / mup / pos  无参数
  * 响应：OK <id> [数据] / ERR <id> <原因>；初始化完成后先输出 READY。
+ *
+ * 【Win7 兼容性 · 重要】
+ *   Win7 SP1 默认只有 PowerShell 2.0 + .NET 3.5。旧版这里用
+ *   `$line | ConvertFrom-Json`（ConvertFrom-Json 是 PowerShell 3.0 才加入）和
+ *   `[string]::IsNullOrWhiteSpace`（.NET Framework 4.0 才加入），两者在 Win7
+ *   上都会抛异常；而异常发生在解析出 $id 之前，回的是 `ERR  <原因>`（id 为空），
+ *   Node 端匹配不到等待中的请求，最终统一显示「注入超时」。
+ *   因此这里改成纯制表符协议 + 只用 PS 2.0 / .NET 2.0 就有的语法。
  *
  * 所有操作发给「当前前台窗口」。影音软件全屏时即为前台，方向键
  * 对应音量/快进、空格对应播放暂停、Esc 退出全屏、F 切换全屏——这正是
@@ -46,10 +54,11 @@ for (let i = 1; i <= 12; i++) VK[`f${i}`] = 0x6F + i;
 for (let i = 0; i < 10; i++) VK[String(i)] = 0x30 + i;
 for (let i = 0; i < 26; i++) VK[String.fromCharCode(97 + i)] = 0x41 + i;
 
-/** PowerShell 常驻脚本（模板字符串内无 ${} 与反引号，PowerShell 的 $x 原样保留） */
+/** PowerShell 常驻脚本（模板字符串内不能出现反引号与 ${ }） */
 const PS_SCRIPT = `
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @'
+try {
+  Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class LPInputNative {
@@ -89,46 +98,65 @@ public static class LPInputNative {
   }
 }
 '@
+} catch {
+  [Console]::WriteLine('BOOTERR ' + $_.Exception.Message)
+  [Console]::Out.Flush()
+  exit 1
+}
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::WriteLine('READY')
+$verInfo = 'unknown'
+try { $verInfo = 'PS' + $PSVersionTable.PSVersion.ToString() + ' CLR' + [Environment]::Version.ToString() } catch { }
+[Console]::WriteLine('READY ' + $verInfo)
 [Console]::Out.Flush()
 
-while (($line = [Console]::In.ReadLine()) -ne $null) {
-  if ([string]::IsNullOrWhiteSpace($line)) { continue }
-  $id = ''
+while ($true) {
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line) { break }
+  if ([string]::IsNullOrEmpty($line)) { continue }
+  if ($line.Trim().Length -eq 0) { continue }
+
+  # 制表符分隔，不用 JSON —— Win7 的 PowerShell 2.0 没有 ConvertFrom-Json
+  $parts = $line.Split([char]9)
+  $id = [string]$parts[0]
+  $cmd = ''
+  if ($parts.Length -gt 1) { $cmd = [string]$parts[1] }
+  $a1 = ''
+  if ($parts.Length -gt 2) { $a1 = [string]$parts[2] }
+  $a2 = ''
+  if ($parts.Length -gt 3) { $a2 = [string]$parts[3] }
+
+  $reply = ''
   try {
-    $o = $line | ConvertFrom-Json
-    $id = [string]$o.id
-    switch ([string]$o.cmd) {
+    switch ($cmd) {
       'key' {
-        $vk = [byte]$o.vk
+        $vk = [byte][int]$a1
         [LPInputNative]::keybd_event($vk, 0, 0, [UIntPtr]::Zero)
         [LPInputNative]::keybd_event($vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero)
       }
       'combo' {
         # 组合键：如 Alt+Enter(全屏)、Ctrl+→(下一集)、Alt+F4(关闭窗口)
-        # 先依次按下所有修饰键，短暂停顿后逆序抬起
-        $vks = @($o.vks)
+        $vks = @()
+        if ($a1.Length -gt 0) { $vks = @($a1.Split(',')) }
         foreach ($vk in $vks) {
-          [LPInputNative]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero)
+          [LPInputNative]::keybd_event([byte][int]$vk, 0, 0, [UIntPtr]::Zero)
           Start-Sleep -Milliseconds 20
         }
         Start-Sleep -Milliseconds 40
         [array]::Reverse($vks)
         foreach ($vk in $vks) {
-          [LPInputNative]::keybd_event([byte]$vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero)
+          [LPInputNative]::keybd_event([byte][int]$vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero)
           Start-Sleep -Milliseconds 20
         }
       }
-      'keydown' { [LPInputNative]::keybd_event([byte]$o.vk, 0, 0, [UIntPtr]::Zero) }
-      'keyup'   { [LPInputNative]::keybd_event([byte]$o.vk, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero) }
+      'keydown' { [LPInputNative]::keybd_event([byte][int]$a1, 0, 0, [UIntPtr]::Zero) }
+      'keyup'   { [LPInputNative]::keybd_event([byte][int]$a1, 0, [LPInputNative]::KEYUP, [UIntPtr]::Zero) }
       'type' {
-        $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$o.text))
+        $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a1))
         $n = [LPInputNative]::TypeText($text)
         if ($n -lt $text.Length) { throw '部分字符发送失败' }
       }
-      'move'   { [LPInputNative]::mouse_event(0x0001, [int]$o.dx, [int]$o.dy, 0, [UIntPtr]::Zero) }
-      'moveto' { [LPInputNative]::SetCursorPos([int]$o.x, [int]$o.y) | Out-Null }
+      'move'   { [LPInputNative]::mouse_event(0x0001, [int]$a1, [int]$a2, 0, [UIntPtr]::Zero) }
+      'moveto' { [LPInputNative]::SetCursorPos([int]$a1, [int]$a2) | Out-Null }
       'click'  {
         [LPInputNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
         [LPInputNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
@@ -139,21 +167,57 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
       }
       'mdown'  { [LPInputNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) }
       'mup'    { [LPInputNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
-      'wheel'  { [LPInputNative]::mouse_event(0x0800, 0, 0, [int]$o.delta, [UIntPtr]::Zero) }
-      'pos'    {
-        [Console]::WriteLine('OK ' + $id + ' ' + [LPInputNative]::CursorPos())
-        [Console]::Out.Flush()
-        continue
+      'wheel'  { [LPInputNative]::mouse_event(0x0800, 0, 0, [int]$a1, [UIntPtr]::Zero) }
+      'pos'    { $reply = [LPInputNative]::CursorPos() }
+      'probe'  {
+        # 只读自检：验证 base64/UTF-8 往返，不做任何真实注入，便于排障
+        $s = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a1))
+        $reply = 'LEN' + $s.Length
       }
-      default  { throw ('未知指令: ' + $o.cmd) }
+      default  { throw ('未知指令: ' + $cmd) }
     }
-    [Console]::WriteLine('OK ' + $id)
+    if ($reply.Length -gt 0) { [Console]::WriteLine('OK ' + $id + ' ' + $reply) }
+    else { [Console]::WriteLine('OK ' + $id) }
   } catch {
     [Console]::WriteLine('ERR ' + $id + ' ' + $_.Exception.Message)
   }
   [Console]::Out.Flush()
 }
 `;
+
+/** 把一条指令编码为制表符分隔的一行（不含换行以外的任何空白歧义） */
+function encodeLine(id, obj) {
+  const cmd = String(obj.cmd || '');
+  const parts = [id, cmd];
+  const n = (v) => String(Number(v) || 0);
+  switch (cmd) {
+    case 'key':
+    case 'keydown':
+    case 'keyup':
+      parts.push(n(obj.vk));
+      break;
+    case 'combo':
+      parts.push((Array.isArray(obj.vks) ? obj.vks : []).map(n).join(','));
+      break;
+    case 'type':
+    case 'probe':
+      // base64 字符集不含制表符，可安全作为字段
+      parts.push(String(obj.text || ''));
+      break;
+    case 'move':
+      parts.push(n(obj.dx), n(obj.dy));
+      break;
+    case 'moveto':
+      parts.push(n(obj.x), n(obj.y));
+      break;
+    case 'wheel':
+      parts.push(n(obj.delta));
+      break;
+    default:
+      break; // click / rclick / mdown / mup / pos
+  }
+  return parts.join('\t') + '\n';
+}
 
 class WinInputDriver {
   constructor() {
@@ -164,6 +228,9 @@ class WinInputDriver {
     this.buf = '';
     this.starting = null;
     this.stopped = false;
+    this.lastStderr = '';
+    this.bootError = '';
+    this.psInfo = '';
   }
 
   get running() { return !!(this.child && !this.child.killed && this.ready); }
@@ -174,6 +241,8 @@ class WinInputDriver {
     if (!WIN) return Promise.resolve(false);
     if (this.starting) return this.starting;
     this.stopped = false;
+    this.lastStderr = '';
+    this.bootError = '';
     this.starting = new Promise((resolve) => {
       let child;
       try {
@@ -182,6 +251,7 @@ class WinInputDriver {
           { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (e) {
         this.starting = null;
+        this.lastStderr = e.message;
         return resolve(false);
       }
       this.child = child;
@@ -189,9 +259,11 @@ class WinInputDriver {
       this.buf = '';
 
       let settled = false;
+      let startTimer = null;
       const finish = (ok) => {
         if (settled) return;
         settled = true;
+        if (startTimer) clearTimeout(startTimer);
         this.ready = ok;
         this.starting = null;
         resolve(ok);
@@ -204,66 +276,114 @@ class WinInputDriver {
         while ((i = this.buf.indexOf('\n')) >= 0) {
           const line = this.buf.slice(0, i).replace(/\r$/, '');
           this.buf = this.buf.slice(i + 1);
-          if (line === 'READY') { finish(true); continue; }
+          if (line.indexOf('READY') === 0) {
+            this.psInfo = line.slice(5).trim();
+            finish(true);
+            continue;
+          }
+          if (line.indexOf('BOOTERR ') === 0) {
+            this.bootError = line.slice(8).trim();
+            finish(false);
+            continue;
+          }
           this._onLine(line);
         }
       });
-      child.stderr.on('data', () => { /* 丢弃 PowerShell 告警，避免噪音 */ });
-      child.once('error', () => finish(false));
+      // 保留 stderr：Win7 上 Add-Type 失败（未启用 .NET 3.5）时能把真实原因回给用户
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        this.lastStderr = (this.lastStderr + chunk).slice(-2000);
+      });
+      child.once('error', (e) => {
+        this.lastStderr = e.message;
+        finish(false);
+      });
       child.once('exit', () => {
         finish(false);
         this.ready = false;
         this.child = null;
         // 未主动停止时，把排队中的请求全部判失败（上层可重试）
-        for (const [, p] of this.pending) {
-          clearTimeout(p.timer);
-          try { p.resolve({ ok: false, error: '注入进程已退出' }); } catch {}
-        }
-        this.pending.clear();
-        // 如果仍在使用中，下次 exec 会重新 ensure 起进程
+        this._failAll('注入进程已退出');
       });
 
-      // 启动超时：PowerShell 首次 Add-Type 编译可能较慢
-      setTimeout(() => { if (!this.ready) finish(false); }, 8000);
+      // Win7 首次 Add-Type 冷编译可能超过 8 秒，放宽到 15 秒；超时后杀掉，避免残留孤儿进程
+      startTimer = setTimeout(() => {
+        if (!this.ready) {
+          try { if (this.child && !this.child.killed) this.child.kill(); } catch {}
+          finish(false);
+        }
+      }, 15000);
     });
     return this.starting;
+  }
+
+  /** 启动/崩溃原因摘要，用于把真实错误带到手机页面上 */
+  _reason() {
+    const env = this.psInfo ? ' (' + this.psInfo + ')' : '';
+    const s = (this.bootError || this.lastStderr || '').trim().split(/\r?\n/).filter(Boolean);
+    const detail = s.length ? '：' + s[s.length - 1].slice(0, 160) : '';
+    return env + detail;
+  }
+
+  _failAll(msg) {
+    const full = msg + this._reason();
+    for (const [, p] of this.pending) {
+      clearTimeout(p.timer);
+      try { p.resolve({ ok: false, error: full }); } catch {}
+    }
+    this.pending.clear();
   }
 
   _onLine(line) {
     const sp = line.indexOf(' ');
     if (sp < 0) return;
     const tag = line.slice(0, sp);
-    const rest = line.slice(sp + 1);
-    const id = (tag === 'OK' || tag === 'ERR') ? rest.split(' ')[0] : '';
-    const p = this.pending.get(id);
-    if (!p) return;
-    this.pending.delete(id);
-    clearTimeout(p.timer);
-    if (tag === 'OK') {
-      const payload = rest.slice(id.length).trim();
-      p.resolve({ ok: true, data: payload || '' });
+    if (tag !== 'OK' && tag !== 'ERR') return;
+    const raw = line.slice(sp + 1);
+    // 正常是 "OK <id> [数据]"；若 PowerShell 在解析出 id 之前就异常，
+    // 会输出 "ERR  <原因>"（两个空格），此时把错误归给最早的请求，
+    // 不再让上层等 5 秒后只看到「注入超时」。
+    const hasId = raw.length > 0 && !/^\s/.test(raw);
+    let id = '';
+    let payload = '';
+    if (hasId) {
+      const k = raw.indexOf(' ');
+      id = k < 0 ? raw : raw.slice(0, k);
+      payload = k < 0 ? '' : raw.slice(k + 1).trim();
     } else {
-      p.resolve({ ok: false, error: rest.slice(id.length).trim() || '执行失败' });
+      payload = raw.trim();
     }
+    let key = id;
+    let p = id ? this.pending.get(id) : null;
+    if (!p && !id) {
+      for (const [k, v] of this.pending) { key = k; p = v; break; }
+    }
+    if (!p) return;
+    this.pending.delete(key);
+    clearTimeout(p.timer);
+    if (tag === 'OK') p.resolve({ ok: true, data: payload || '' });
+    else p.resolve({ ok: false, error: payload || '执行失败' });
   }
 
   /** 执行一条注入指令，返回 Promise<{ok, data?, error?}> */
   async exec(obj) {
     const ok = await this.ensure();
-    if (!ok) return { ok: false, error: WIN ? '键盘注入服务启动失败' : '仅 Windows 支持键盘注入' };
+    if (!ok) {
+      const base = WIN ? '键盘注入服务启动失败' : '仅 Windows 支持键盘注入';
+      return { ok: false, error: base + this._reason() };
+    }
     if (!this.child || !this.child.stdin || this.child.stdin.destroyed) {
       return { ok: false, error: '注入进程不可用' };
     }
     const id = String(++this.seq);
-    const msg = Object.assign({ id }, obj);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        resolve({ ok: false, error: '注入超时' });
-      }, 5000);
+        resolve({ ok: false, error: '注入超时' + this._reason() });
+      }, 8000);
       this.pending.set(id, { resolve, timer });
       try {
-        this.child.stdin.write(JSON.stringify(msg) + '\n', 'utf8');
+        this.child.stdin.write(encodeLine(id, obj), 'utf8');
       } catch (e) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -300,11 +420,7 @@ class WinInputDriver {
     }
     this.child = null;
     this.starting = null;
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
-      try { p.resolve({ ok: false, error: '注入服务已停止' }); } catch {}
-    }
-    this.pending.clear();
+    this._failAll('注入服务已停止');
   }
 }
 
@@ -316,4 +432,4 @@ function clamp(v, lo, hi) {
 
 const winInput = new WinInputDriver();
 
-module.exports = { WinInputDriver, winInput, VK };
+module.exports = { WinInputDriver, winInput, VK, encodeLine, PS_SCRIPT };

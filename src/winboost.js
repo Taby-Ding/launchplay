@@ -149,7 +149,8 @@ while ($true) {
     while ($queue.Count -gt 0 -and $n -lt 80) {
       $p = [uint32]$queue.Dequeue()
       $n++
-      Get-CimInstance Win32_Process -Filter "ParentProcessId=$p" -ErrorAction SilentlyContinue | ForEach-Object {
+      # Win7 默认 PowerShell 2.0 没有 Get-CimInstance（PS 3.0 才加入），用等价的 WMI cmdlet
+      Get-WmiObject Win32_Process -Filter "ParentProcessId=$p" -ErrorAction SilentlyContinue | ForEach-Object {
         if ($kidSet.Add([uint32]$_.ProcessId)) { $queue.Enqueue([uint32]$_.ProcessId) }
       }
     }

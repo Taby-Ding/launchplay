@@ -28,6 +28,7 @@
 - **全仓文案合规**：删除「爱奇艺」「腾讯视频」「优酷」等具体平台名，统一称「影音软件」。
 - 配置 schema 升级到 v8，旧天气城市 id 自动迁移；新增 `customKeys`、`parental.lockdown` 等字段。
 - **修复 Win7 版启动卡在启动画面**：`protocol.handle` 是 Electron 25 才提供的 API，Electron 22 内核下调用会抛异常、主窗口无法创建。`tlapp://` 图标 / 背景协议改为按能力自动分流——新内核走 `protocol.handle`，旧内核回退 `protocol.registerBufferProtocol`，两者共用同一套目录穿越校验。
+- **修复 Win7 版手机遥控无法模拟鼠标 / 键盘输入报「注入超时」**：Win7 SP1 默认只有 PowerShell 2.0 + .NET 3.5，而键鼠注入脚本用了 `ConvertFrom-Json`（PowerShell 3.0 才有）和 `String.IsNullOrWhiteSpace`（.NET 4.0 才有）。异常发生在解析出指令 id 之前，回的是 `ERR  <原因>`，Node 端匹配不到等待中的请求，5 秒后统一显示「注入超时」。现在改为纯制表符分隔协议、只用 PS 2.0 / .NET 2.0 语法；同时把 PowerShell 报错回传到手机页、把无 id 的错误归给最早的请求、把 `Add-Type` 启动失败原因显式输出，并放宽冷启动编译超时到 15 秒。窗口置顶辅助脚本里的 `Get-CimInstance` 也换成 Win7 可用的 `Get-WmiObject`。
 
 ## 品牌升级（1.0.0 构建内）
 
