@@ -32,8 +32,8 @@
 | **Windows 10/11** | x64 | [LaunchPlay-1.0.0-windows-x64.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64.exe) | ~71 MB | 免安装便携版：单文件双击即用，不用安装，但每次启动都要自解压 |
 | **Windows 7**（专用版·安装） | x64 | [LaunchPlay-1.0.0-windows-x64-win7-setup.exe](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64-win7-setup.exe) | ~62 MB | **推荐**：装一次到固定目录，启动快；Win7 / Win10 / Win11 均可运行 |
 | **Windows 7**（专用版·免安装） | x64 | [LaunchPlay-1.0.0-windows-x64-win7-portable.zip](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-windows-x64-win7-portable.zip) | ~85 MB | 解压到任意文件夹，双击 `LaunchPlayWin7.exe` 即用，无需安装、无需管理员权限 |
-| **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.AppImage](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.AppImage) | ~110 MB | 通用单文件，`chmod +x` 后直接运行 |
-| **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.tar.gz](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.tar.gz) | ~111 MB | 解压即用的绿色目录，AppImage 跑不起来时用它 |
+| **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.AppImage](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.AppImage) | ~86 MB | 通用单文件，`chmod +x` 后直接运行 |
+| **Linux** | x64 | [LaunchPlay-1.0.0-linux-x64.tar.gz](https://github.com/Taby-Ding/launchplay/releases/download/v1.0.0/LaunchPlay-1.0.0-linux-x64.tar.gz) | ~106 MB | 解压即用的绿色目录，AppImage 跑不起来时用它 |
 
 > 全部产物都在 [Releases](https://github.com/Taby-Ding/launchplay/releases/tag/v1.0.0) 页面。
 >
