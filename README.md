@@ -48,7 +48,7 @@
 >
 > **Win7 用户请下载专用版**（`-win7-setup.exe` 或 `-win7-portable.zip`）：主版本基于 Electron 38，从 Electron 23 起官方已不支持 Win7，无法在 Win7 启动；专用版基于 Electron 22 单独构建，与上面两个版本完全隔离（独立 AUMID 和数据目录，可共存），在 Win10/11 上也能运行。它要求 Win7 SP1，并建议先装 KB2533623、KB2670838 两个补丁（精简版系统常见缺失，缺了会打不开）。Win7 版不支持应用内自动更新，请在「关于」里点「打开下载页」手动获取新版。早期提供的单文件 `-win7.exe` 自解压版在部分系统上启动后会立即退出，已停用，请改用安装版或解压版。
 >
-> Linux AppImage 由 CI 在 Ubuntu runner 上构建（原因见[构建说明](#构建说明)）；Windows 包与 Linux tar.gz 已在本地验证过可运行。
+> Linux 的 AppImage / tar.gz 由 CI 在 Ubuntu runner 上构建（原因见[构建说明](#构建说明)）。Release 里的 Windows、Win7、Linux 资产均基于同一份源码重新构建；Windows 包与 Linux tar.gz 已验证可运行。
 
 ### 各平台首次运行
 
@@ -344,6 +344,19 @@ npm run dist:win       # Windows 便携 exe        -> release/LaunchPlay-<ver>-w
 npm run dist:linux     # AppImage + tar.gz       -> release/LaunchPlay-<ver>-linux-x64.*
 ```
 
+### Windows 7 专用版
+
+Win7 专用版**不是只有下载链接**，完整源码就在本仓库的 `launchplay-win7/` 目录：
+
+```bash
+cd launchplay-win7
+npm install                       # 安装 Electron 22.3.27
+npm run prepare-electron          # 生成精简运行时
+npx electron-builder --win nsis --x64 --config.electronDist=build/electron-dist --publish never
+```
+
+它与主版本共用同一份 `src/`，差异只在 `package.json`（`productName` / Electron 版本）以及 `src/main.js` 的 appId（`com.launchplay.desktop.win7`）与数据目录（`LaunchPlayWin7Data`），因此两个版本可以同机共存。改动功能时两边源码都要同步；完整构建步骤与已知限制见 `launchplay-win7/Win7版说明.md`。CI 只构建主版本，Win7 安装包与解压包在本地构建后作为 Release 资产发布。
+
 其他脚本：
 
 ```bash
@@ -369,6 +382,7 @@ npm run prepare-electron  # 只生成精简版 Electron 运行时（Windows 打�
 ## 项目结构
 
 ```
+launchplay-win7/     Win7 专用版源码副本（Electron 22.3.27、独立 appId 与数据目录）
 src/
   main.js            主进程：窗口、IPC、协议、生命周期
   platform.js        平台能力表（两个平台的差异集中在这里）

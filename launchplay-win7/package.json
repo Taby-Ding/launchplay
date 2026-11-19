@@ -1,0 +1,97 @@
+{
+  "name": "launchplay-win7",
+  "productName": "LaunchPlayWin7",
+  "version": "1.0.0",
+  "description": "影游快启 (LaunchPlay) Win7 兼容版 —— 基于 Electron 22.3.27，专供 Windows 7 用户",
+  "main": "src/main.js",
+  "author": "Taby-Ding",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taby-Ding/launchplay.git"
+  },
+  "homepage": "https://github.com/Taby-Ding/launchplay#readme",
+  "bugs": {
+    "url": "https://github.com/Taby-Ding/launchplay/issues"
+  },
+  "keywords": [
+    "electron",
+    "launcher",
+    "htpc",
+    "tv",
+    "windows",
+    "macos",
+    "linux",
+    "kiosk",
+    "remote-control",
+    "media-center"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "icon": "node tools/make-icon.js",
+    "prepare-electron": "node tools/prepare-electron.js",
+    "dist": "npm run dist:win",
+    "dist:win": "node tools/prepare-electron.js && electron-builder --win portable --x64 --config.electronDist=build/electron-dist --publish never"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.launchplay.desktop.win7",
+    "productName": "LaunchPlayWin7",
+    "asar": true,
+    "compression": "maximum",
+    "afterPack": "tools/after-pack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Taby-Ding",
+        "repo": "launchplay"
+      }
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/node_modules/**/{test,__tests__,tests,example,examples,docs,doc}/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "LaunchPlay-${version}-windows-x64-win7.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "portable": {
+      "artifactName": "LaunchPlay-${version}-windows-x64-win7.${ext}",
+      "unpackDirName": "LaunchPlayWin7"
+    },
+    "nsis": {
+      "artifactName": "LaunchPlay-${version}-windows-x64-win7-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "影游快启 Win7",
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "zh-CN",
+        "en-US"
+      ],
+      "language": "2052"
+    }
+  }
+}

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>影游快启 · 手机遥控</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --rs: 1; /* 大字版基准；标准版 0.75 = 最初版 1.5 倍 */
+      --bg: #0b1020; --surface: #161e33; --surface-2: #1e2842;
+      --line: #2a3452; --text: #eef2ff; --muted: #93a0c4;
+      --accent: #6d8bff; --danger: #ff6b6b; --ok: #43d9a3;
+    }
+    html[data-size="standard"] { --rs: 0.75; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      padding: calc(env(safe-area-inset-top) + calc(14px * var(--rs, 1))) calc(16px * var(--rs, 1)) calc(env(safe-area-inset-bottom) + calc(18px * var(--rs, 1)));
+      min-height: 100%; user-select: none; -webkit-user-select: none;
+      overscroll-behavior: none;
+    }
+    .wrap { width: 100%; max-width: calc(560px * var(--rs, 1)); display: flex; flex-direction: column; gap: calc(18px * var(--rs, 1)); flex: 1; }
+
+    header { text-align: center; }
+    .brand { font-size: calc(34px * var(--rs, 1)); font-weight: 600; letter-spacing: calc(.5px * var(--rs, 1)); }
+    .brand small { font-weight: 400; color: var(--muted); font-size: calc(24px * var(--rs, 1)); margin-left: calc(6px * var(--rs, 1)); }
+    #status {
+      margin-top: calc(6px * var(--rs, 1)); font-size: calc(24px * var(--rs, 1)); color: var(--muted);
+      display: inline-flex; align-items: center; gap: calc(6px * var(--rs, 1)); justify-content: center;
+    }
+    .dot { width: calc(7px * var(--rs, 1)); height: calc(7px * var(--rs, 1)); border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--ok); box-shadow: 0 0 0 calc(3px * var(--rs, 1)) rgba(67,217,163,.16); }
+    .dot.err { background: var(--danger); }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: calc(24px * var(--rs, 1)); padding: calc(20px * var(--rs, 1));
+    }
+    .card-title { font-size: calc(24px * var(--rs, 1)); color: var(--muted); margin: 0 0 calc(14px * var(--rs, 1)) calc(4px * var(--rs, 1)); }
+    .card-note { font-size: calc(22px * var(--rs, 1)); color: var(--muted); line-height: 1.6; margin: calc(10px * var(--rs, 1)) calc(2px * var(--rs, 1)) 0; opacity: .85; }
+
+    /* 方向键 + 确定 */
+    .dpad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, calc(112px * var(--rs, 1)));
+      gap: calc(10px * var(--rs, 1));
+    }
+    .key {
+      border: 1px solid var(--line); background: var(--surface-2);
+      color: var(--text); border-radius: calc(22px * var(--rs, 1)); font-size: calc(30px * var(--rs, 1)); font-weight: 500;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: transform .06s, background .12s, border-color .12s;
+      touch-action: manipulation;
+    }
+    .key:active, .key.press { transform: scale(.94); background: var(--accent); border-color: var(--accent); color: #fff; }
+    .key svg { width: calc(44px * var(--rs, 1)); height: calc(44px * var(--rs, 1)); fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .k-up { grid-area: 1 / 2; } .k-left { grid-area: 2 / 1; }
+    .k-ok { grid-area: 2 / 2; background: var(--accent); border-color: var(--accent); color: #fff; font-size: calc(30px * var(--rs, 1)); }
+    .k-right { grid-area: 2 / 3; } .k-down { grid-area: 3 / 2; }
+
+    .row { display: grid; gap: calc(10px * var(--rs, 1)); }
+    .row.two { grid-template-columns: repeat(2, 1fr); }
+    .row.three { grid-template-columns: repeat(2, 1fr); }
+    .row.three > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .row.four { grid-template-columns: repeat(2, 1fr); }
+    .btn {
+      border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+      border-radius: calc(18px * var(--rs, 1)); padding: calc(16px * var(--rs, 1)) calc(8px * var(--rs, 1)); font-size: calc(26px * var(--rs, 1)); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: calc(4px * var(--rs, 1));
+      transition: transform .06s, background .12s, border-color .12s; touch-action: manipulation;
+    }
+    .btn:active, .btn.press { transform: scale(.95); background: var(--accent); border-color: var(--accent); }
+    .btn svg { width: calc(36px * var(--rs, 1)); height: calc(36px * var(--rs, 1)); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .btn.danger { color: var(--danger); }
+    .btn.danger:active { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+    /* 触摸板 */
+    .touchpad {
+      position: relative; height: calc(280px * var(--rs, 1)); border-radius: calc(24px * var(--rs, 1));
+      background: radial-gradient(ellipse at 50% 45%, var(--surface-2), var(--bg));
+      border: 1px dashed var(--line); overflow: hidden;
+      touch-action: none; -webkit-user-select: none; user-select: none;
+    }
+    .tp-hint {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: calc(24px * var(--rs, 1)); color: var(--muted); pointer-events: none; text-align: center; padding: 0 calc(16px * var(--rs, 1));
+    }
+    .tp-dot {
+      position: absolute; width: calc(56px * var(--rs, 1)); height: calc(56px * var(--rs, 1)); left: 50%; top: 50%;
+      margin: -calc(28px * var(--rs, 1)) 0 0 -calc(28px * var(--rs, 1)); border-radius: 50%;
+      background: rgba(109,139,255,.25); border: 1px solid var(--accent);
+      opacity: 0; transition: opacity .2s; pointer-events: none;
+    }
+    .touchpad.active .tp-dot { opacity: 1; }
+    .touchpad.press .tp-dot { background: rgba(109,139,255,.5); transform: scale(.8); }
+
+    /* 键盘输入行 */
+    .kb-input-row { display: flex; gap: calc(8px * var(--rs, 1)); }
+    .kb-input {
+      flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg);
+      color: var(--text); border-radius: calc(16px * var(--rs, 1)); padding: calc(14px * var(--rs, 1)) calc(16px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1));
+      -webkit-user-select: text; user-select: text;
+    }
+    .kb-input:focus { outline: none; border-color: var(--accent); }
+    .kb-send {
+      border: 1px solid var(--accent); background: var(--accent); color: #fff;
+      border-radius: calc(16px * var(--rs, 1)); padding: 0 calc(24px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1)); cursor: pointer;
+    }
+    .kb-send:active { transform: scale(.96); }
+
+    .foot { text-align: center; font-size: calc(22px * var(--rs, 1)); color: var(--muted); line-height: 1.7; padding-bottom: calc(10px * var(--rs, 1)); }
+
+    /* 确认弹层（关机/重启/关闭程序） */
+    .confirm {
+      position: fixed; inset: 0; background: rgba(4,7,16,.82);
+      display: none; align-items: center; justify-content: center; padding: calc(24px * var(--rs, 1)); z-index: 10;
+      backdrop-filter: blur(calc(4px * var(--rs, 1)));
+    }
+    .confirm.show { display: flex; }
+    .confirm-box {
+      background: var(--surface); border: 1px solid var(--line); border-radius: calc(28px * var(--rs, 1));
+      padding: calc(30px * var(--rs, 1)) calc(26px * var(--rs, 1)) calc(24px * var(--rs, 1)); width: 100%; max-width: calc(480px * var(--rs, 1)); text-align: center;
+    }
+    .confirm-box h3 { margin: 0 0 calc(12px * var(--rs, 1)); font-size: calc(34px * var(--rs, 1)); }
+    .confirm-box p { margin: 0 0 calc(26px * var(--rs, 1)); font-size: calc(26px * var(--rs, 1)); color: var(--muted); line-height: 1.6; }
+    .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: calc(10px * var(--rs, 1)); }
+    .confirm-actions button {
+      border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+      border-radius: calc(16px * var(--rs, 1)); padding: calc(16px * var(--rs, 1)); font-size: calc(28px * var(--rs, 1)); cursor: pointer;
+    }
+    .confirm-actions .go { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+    .err-banner {
+      display: none; background: rgba(255,107,107,.12); border: 1px solid var(--danger);
+      color: #ffb3b3; border-radius: calc(12px * var(--rs, 1)); padding: calc(10px * var(--rs, 1)) calc(12px * var(--rs, 1)); font-size: calc(24px * var(--rs, 1)); line-height: 1.6;
+    }
+    .err-banner.show { display: block; }
+  
+    /* 字号切换按钮与万能键 */
+    .size-toggle {
+      margin-top: calc(12px * var(--rs, 1));
+      border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+      border-radius: calc(999px * var(--rs, 1)); cursor: pointer;
+      padding: calc(8px * var(--rs, 1)) calc(20px * var(--rs, 1));
+      font-size: calc(22px * var(--rs, 1)); min-height: 40px;
+      touch-action: manipulation;
+    }
+    .size-toggle:active { background: var(--accent); color: #fff; }
+    .macro-empty { font-size: calc(22px * var(--rs, 1)); color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">影游快启 <small>手机遥控</small></div>
+      <div id="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></div>
+      <button class="size-toggle" id="sizeBtn" type="button">大字版 · 切标准版</button>
+    </header>
+
+    <div class="err-banner" id="errBanner"></div>
+
+    <div class="card" id="cardNav">
+      <p class="card-title">导航</p>
+      <div class="dpad">
+        <div class="key k-up" data-action="up" role="button" aria-label="上"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></div>
+        <div class="key k-left" data-action="left" role="button" aria-label="左"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></div>
+        <div class="key k-ok" data-action="ok" role="button">确定</div>
+        <div class="key k-right" data-action="right" role="button" aria-label="右"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></div>
+        <div class="key k-down" data-action="down" role="button" aria-label="下"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">启动台</p>
+      <div class="row two">
+        <div class="btn" data-action="back" role="button"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>返回</div>
+        <div class="btn" data-action="toggle" role="button"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>唤出/收起</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">音量与播放</p>
+      <div class="row four">
+        <div class="btn" data-action="voldown" role="button"><svg class="ic-voldown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h3.8l4.7-3.9v13.8L6.8 15H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" style="fill:currentColor;stroke:none"/><path d="M16.4 9.1a4.3 4.3 0 0 1 0 5.8" style="fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round"/></svg>音量−</div>
+        <div class="btn" data-action="mute" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>静音</div>
+        <div class="btn" data-action="volup" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>音量+</div>
+        <div class="btn" data-action="play" role="button"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>播放</div>
+      </div>
+      <div class="row two" style="margin-top:8px">
+        <div class="btn" data-action="prev" role="button"><svg viewBox="0 0 24 24"><path d="M19 5L9 12l10 7z"/><path d="M6 5v14"/></svg>上一个</div>
+        <div class="btn" data-action="next" role="button"><svg viewBox="0 0 24 24"><path d="M5 5l10 7-10 7z"/><path d="M18 5v14"/></svg>下一个</div>
+      </div>
+    </div>
+
+    <div class="card" id="cardPlay">
+      <p class="card-title">播放遥控 · 直接控制正在看的视频</p>
+      <div class="row four">
+        <div class="btn" data-action="rew" role="button"><svg viewBox="0 0 24 24"><path d="M11 6L5 12l6 6M19 6l-6 6 6 6"/></svg>快退</div>
+        <div class="btn" data-action="playpause" role="button"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>播放/暂停</div>
+        <div class="btn" data-action="ffwd" role="button"><svg viewBox="0 0 24 24"><path d="M13 6l6 6-6 6M5 6l6 6-6 6"/></svg>快进</div>
+        <div class="btn" data-action="fullscreen" role="button"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>全屏</div>
+      </div>
+      <div class="row four" style="margin-top:8px">
+        <div class="btn" data-action="voldown" role="button"><svg class="ic-voldown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h3.8l4.7-3.9v13.8L6.8 15H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" style="fill:currentColor;stroke:none"/><path d="M16.4 9.1a4.3 4.3 0 0 1 0 5.8" style="fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round"/></svg>音量−</div>
+        <div class="btn" data-action="volup" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>音量+</div>
+        <div class="btn" data-action="mute" role="button"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>静音</div>
+        <div class="btn" data-action="nextep" role="button"><svg viewBox="0 0 24 24"><path d="M5 5l10 7-10 7z"/><path d="M19 5v14"/></svg>下一集</div>
+      </div>
+    </div>
+
+    <div class="card" id="cardMacro" style="display:none">
+      <p class="card-title">万能键 · 在电脑端设置里自定义</p>
+      <div class="row four" id="macroRow"></div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">鼠标 · 在下方触摸板上滑动</p>
+      <div class="touchpad" id="touchpad" role="application" aria-label="触摸板，滑动移动鼠标">
+        <div class="tp-hint" id="tpHint">滑动移动光标 · 轻点左键 · 长按右键</div>
+        <div class="tp-dot" id="tpDot"></div>
+      </div>
+      <div class="row four" style="margin-top:8px">
+        <div class="btn" data-mouse="click" role="button"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="6"/><path d="M12 2v8"/></svg>左键</div>
+        <div class="btn" data-mouse="rclick" role="button"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="6"/><path d="M12 2v8M6 10h6"/></svg>右键</div>
+        <div class="btn" data-mouse="wheelup" role="button"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>上滚</div>
+        <div class="btn" data-mouse="wheeldown" role="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>下滚</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">键盘 · 输入文字发到电脑</p>
+      <div class="kb-input-row">
+        <input id="kbText" class="kb-input" type="text" placeholder="输入文字（支持中文）" autocomplete="off" autocapitalize="off" />
+        <button class="kb-send" id="kbSend" role="button">发送</button>
+      </div>
+      <div class="row four" style="margin-top:8px">
+        <div class="btn" data-key="enter" role="button">回车</div>
+        <div class="btn" data-key="esc" role="button">Esc</div>
+        <div class="btn" data-key="space" role="button">空格</div>
+        <div class="btn" data-key="backspace" role="button">退格</div>
+      </div>
+      <div class="row four" style="margin-top:8px">
+        <div class="btn" data-key="up" role="button">↑</div>
+        <div class="btn" data-key="left" role="button">←</div>
+        <div class="btn" data-key="down" role="button">↓</div>
+        <div class="btn" data-key="right" role="button">→</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">系统</p>
+      <div class="row three">
+        <div class="btn danger" data-confirm="closeapp" data-title="关闭当前程序？" data-desc="关闭刚刚由启动台打开的程序，未保存的内容可能丢失。" role="button"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>关闭程序</div>
+        <div class="btn danger" data-confirm="restart" data-title="重启电脑？" data-desc="所有正在运行的程序会被关闭，请先保存工作。" role="button"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>重启</div>
+        <div class="btn danger" data-confirm="shutdown" data-title="关闭电脑？" data-desc="电脑会立即关机，请先保存所有工作。" role="button"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>关机</div>
+      </div>
+    </div>
+
+    <div class="foot">与电脑连接同一 WiFi 即可使用<br/>指令仅在本地网络传输，不会上传任何数据</div>
+  </div>
+
+  <div class="confirm" id="confirm">
+    <div class="confirm-box">
+      <h3 id="cTitle">确认？</h3>
+      <p id="cDesc"></p>
+      <div class="confirm-actions">
+        <button id="cCancel">取消</button>
+        <button class="go" id="cGo">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      // 配对码从网址 ?t= 里读，每条指令都带上；电脑端校验不过就不会执行
+      var token = new URLSearchParams(location.search).get('t') || '';
+      var dot = document.getElementById('dot');
+      var statusText = document.getElementById('statusText');
+      var errBanner = document.getElementById('errBanner');
+      var confirmedAction = null;
+      var busy = false;
+      var failCount = 0;
+
+      // 字号：大字版 = 当前尺寸（最初版 2 倍）；标准版 = 最初版 1.5 倍，即大字版的 0.75。
+      // 切换 --rs 后字号、间距、按钮高度、触摸板、图标一起等比缩放；每台手机各自记住选择。
+      var SIZE_KEY = 'lp_remote_size';
+      function applySize(mode) {
+        var std = mode === 'standard';
+        document.documentElement.setAttribute('data-size', std ? 'standard' : 'large');
+        var btn = document.getElementById('sizeBtn');
+        if (btn) btn.textContent = std ? '标准版 · 切大字版' : '大字版 · 切标准版';
+        try { localStorage.setItem(SIZE_KEY, std ? 'standard' : 'large'); } catch (e) {}
+      }
+      var savedSize = 'large';
+      try { savedSize = localStorage.getItem(SIZE_KEY) || 'large'; } catch (e) {}
+      applySize(savedSize);
+      document.getElementById('sizeBtn').addEventListener('click', function () {
+        var std = document.documentElement.getAttribute('data-size') === 'standard';
+        applySize(std ? 'large' : 'standard');
+      });
+
+      // 万能键：手机页只显示名字，具体按键组合保存在电脑端，不下发到手机
+      var macroSig = null;
+      function renderMacros(list) {
+        var card = document.getElementById('cardMacro');
+        var row = document.getElementById('macroRow');
+        if (!card || !row) return;
+        var arr = Array.isArray(list) ? list : [];
+        var sig = arr.map(function (k) { return (k && k.index) + ':' + (k && k.name); }).join('|');
+        if (sig === macroSig) return;
+        macroSig = sig;
+        row.innerHTML = '';
+        if (!arr.length) { card.style.display = 'none'; return; }
+        arr.forEach(function (k, i) {
+          var d = document.createElement('div');
+          d.className = 'btn';
+          d.setAttribute('role', 'button');
+          d.textContent = (k && k.name) || ('万能键 ' + (i + 1));
+          d.addEventListener('click', function () { flash(d); buzz(); send('macro', { index: (k && typeof k.index === 'number') ? k.index : i }); });
+          row.appendChild(d);
+        });
+        card.style.display = '';
+      }
+
+      function setStatus(state, text) {
+        dot.className = 'dot' + (state === 'on' ? ' on' : state === 'err' ? ' err' : '');
+        statusText.textContent = text;
+      }
+      function showError(text) {
+        errBanner.textContent = text;
+        errBanner.classList.add('show');
+        setStatus('err', '连接失败');
+      }
+      function clearError() { errBanner.classList.remove('show'); }
+
+      function flash(el) {
+        el.classList.add('press');
+        setTimeout(function () { el.classList.remove('press'); }, 110);
+      }
+      function buzz() { try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {} }
+
+      function send(action, extra) {
+        if (!token) { showError('网址缺少配对码，请重新扫描电脑上的二维码。'); return; }
+        if (busy) return;
+        busy = true;
+        var body = { t: token, action: action };
+        if (extra && typeof extra === 'object') {
+          for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) body[k] = extra[k];
+        }
+        fetch('/cmd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function (r) {
+          return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; }).then(function (j) {
+            return { status: r.status, j: j };
+          });
+        }).then(function (res) {
+          if (res.j.ok) {
+            failCount = 0;
+            clearError();
+            setStatus('on', '已连接 · 就绪');
+          } else if (res.status === 403) {
+            showError('配对码已失效，请在电脑上重新开启手机遥控并扫描新二维码。');
+          } else {
+            showError('指令未成功：' + (res.j.error || ('HTTP ' + res.status)));
+          }
+        }).catch(function (e) {
+          failCount++;
+          if (failCount >= 2) showError('连不上电脑，请确认：手机和电脑在同一 WiFi；电脑上的 LaunchPlay 仍在运行。');
+          else setStatus('err', '连接中断，重试中…');
+        }).finally(function () { busy = false; });
+      }
+
+      // 鼠标移动：把位移累积起来按固定节拍冲刷，既不丢帧也不发爆请求。
+      // 之前是"超时/busy 就直接丢弃"，快速滑动时大部分位移被丢掉，所以显得很慢。
+      var movePendingX = 0, movePendingY = 0;
+      var moveInFlight = false;
+      var MOVE_INTERVAL = 16; // ~60fps 冲刷一次
+      function flushMove() {
+        if (moveInFlight || !token) return;
+        var dx = Math.max(-800, Math.min(800, Math.round(movePendingX)));
+        var dy = Math.max(-800, Math.min(800, Math.round(movePendingY)));
+        movePendingX = 0; movePendingY = 0;
+        if (!dx && !dy) return;
+        moveInFlight = true;
+        fetch('/cmd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ t: token, action: 'mmove', dx: dx, dy: dy })
+        }).catch(function () {}).finally(function () { moveInFlight = false; });
+      }
+      function sendMove(dx, dy) {
+        if (!token) return;
+        movePendingX += dx; movePendingY += dy;
+        flushMove();
+      }
+      setInterval(flushMove, MOVE_INTERVAL);
+
+      // 普通按键：立即发送
+      document.querySelectorAll('[data-action]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          flash(el); buzz(); send(el.getAttribute('data-action'));
+        });
+      });
+
+      // 危险操作：先弹确认
+      var confirmBox = document.getElementById('confirm');
+      document.querySelectorAll('[data-confirm]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          flash(el); buzz();
+          confirmedAction = el.getAttribute('data-confirm');
+          document.getElementById('cTitle').textContent = el.getAttribute('data-title') || '确认？';
+          document.getElementById('cDesc').textContent = el.getAttribute('data-desc') || '';
+          confirmBox.classList.add('show');
+        });
+      });
+      document.getElementById('cCancel').addEventListener('click', function () {
+        confirmBox.classList.remove('show'); confirmedAction = null;
+      });
+      document.getElementById('cGo').addEventListener('click', function () {
+        confirmBox.classList.remove('show');
+        if (confirmedAction) { send(confirmedAction); confirmedAction = null; }
+      });
+      confirmBox.addEventListener('click', function (e) {
+        if (e.target === confirmBox) { confirmBox.classList.remove('show'); confirmedAction = null; }
+      });
+
+      // 鼠标辅助按钮（左键/右键/滚轮）
+      document.querySelectorAll('[data-mouse]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          flash(el); buzz();
+          var m = el.getAttribute('data-mouse');
+          if (m === 'click') send('mclick');
+          else if (m === 'rclick') send('mrclick');
+          else if (m === 'wheelup') send('mwheel', { delta: 120 });
+          else if (m === 'wheeldown') send('mwheel', { delta: -120 });
+        });
+      });
+
+      // 键盘快捷键
+      document.querySelectorAll('[data-key]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          flash(el); buzz(); send('key', { key: el.getAttribute('data-key') });
+        });
+      });
+
+      // 文本输入
+      var kbText = document.getElementById('kbText');
+      function submitText() {
+        var v = kbText.value;
+        if (!v) return;
+        send('type', { text: v });
+        kbText.value = '';
+        buzz();
+      }
+      document.getElementById('kbSend').addEventListener('click', submitText);
+      kbText.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); submitText(); }
+      });
+
+      // 触摸板：滑动=移动光标，轻点=左键，长按=右键
+      (function () {
+        var pad = document.getElementById('touchpad');
+        var dot = document.getElementById('tpDot');
+        var activeId = null;
+        var lastX = 0, lastY = 0;
+        var startX = 0, startY = 0;
+        var longPressTimer = null;
+        var didMove = false;
+        var didLongPress = false;
+        var SENS = 2.6; // 手指位移 -> 屏幕上鼠标位移的放大系数（调大后滑动更跟手）
+
+        function pointerDown(e) {
+          if (activeId !== null) return;
+          activeId = e.pointerId;
+          lastX = startX = e.clientX;
+          lastY = startY = e.clientY;
+          didMove = false; didLongPress = false;
+          pad.classList.add('active');
+          pad.setPointerCapture && pad.setPointerCapture(e.pointerId);
+          longPressTimer = setTimeout(function () {
+            if (!didMove) {
+              didLongPress = true;
+              pad.classList.add('press');
+              buzz();
+              send('mrclick');
+            }
+          }, 550);
+          e.preventDefault();
+        }
+        function pointerMove(e) {
+          if (e.pointerId !== activeId) return;
+          var dx = e.clientX - lastX, dy = e.clientY - lastY;
+          lastX = e.clientX; lastY = e.clientY;
+          if (!didMove && Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 6) {
+            didMove = true;
+            clearTimeout(longPressTimer);
+            pad.classList.add('active');
+          }
+          if (didMove) {
+            dot.style.left = (50 + (e.clientX - startX) / pad.clientWidth * 40) + '%';
+            dot.style.top = (50 + (e.clientY - startY) / pad.clientHeight * 40) + '%';
+            sendMove(Math.round(dx * SENS), Math.round(dy * SENS));
+          }
+          e.preventDefault();
+        }
+        function pointerUp(e) {
+          if (e.pointerId !== activeId) return;
+          clearTimeout(longPressTimer);
+          activeId = null;
+          pad.classList.remove('active', 'press');
+          dot.style.left = '50%'; dot.style.top = '50%';
+          if (!didMove && !didLongPress) { buzz(); send('mclick'); }
+          e.preventDefault();
+        }
+        pad.addEventListener('pointerdown', pointerDown);
+        pad.addEventListener('pointermove', pointerMove);
+        pad.addEventListener('pointerup', pointerUp);
+        pad.addEventListener('pointercancel', pointerUp);
+      })();
+
+      // 自动把对应卡片滚到最上方（第一次只记录基线，不滚动）：
+      //   · launchSeq 变大（打开程序）      -> 播放遥控卡片
+      //   · front 由 false 变 true（启动台回到最上层） -> 导航卡片
+      var lastLaunchSeq = null;
+      var lastFront = null;
+      function scrollCardToTop(id) {
+        var card = document.getElementById(id);
+        if (!card || !card.scrollIntoView) return;
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        catch (e) { card.scrollIntoView(true); }
+        buzz();
+      }
+      function ping() {
+        fetch('/ping').then(function (r) {
+          if (!r.ok) return;
+          if (!failCount) setStatus('on', '已连接 · 就绪');
+          return r.json().catch(function () { return null; });
+        }).then(function (j) {
+          if (!j) return;
+          renderMacros(j.customKeys);
+          // 先处理"打开程序 -> 播放遥控"
+          if (typeof j.launchSeq === 'number') {
+            if (lastLaunchSeq === null) lastLaunchSeq = j.launchSeq;
+            else if (j.launchSeq > lastLaunchSeq) { lastLaunchSeq = j.launchSeq; scrollCardToTop('cardPlay'); }
+            else if (j.launchSeq < lastLaunchSeq) { lastLaunchSeq = j.launchSeq; } // 服务重启后归零
+          }
+          // 再处理"启动台回到最上层 -> 导航"：放在后面，若同一拍两者都变，以导航为准
+          if (typeof j.front === 'boolean') {
+            if (lastFront === null) lastFront = j.front;
+            else {
+              if (j.front && !lastFront) scrollCardToTop('cardNav');
+              lastFront = j.front;
+            }
+          }
+        }).catch(function () { setStatus('err', '未连接'); });
+      }
+      if (!token) showError('网址缺少配对码，请重新扫描电脑上的二维码。');
+      else ping();
+      // 2.5 秒一次：既能在打开程序后较快跳到播放遥控，又不会占用多少带宽（一次几十字节）
+      setInterval(ping, 2500);
+    })();
+  </script>
+</body>
+</html>

@@ -5,9 +5,18 @@
 > 1.0.0 是首个公开发布版本。此前内部迭代用过 2.0.0 ~ 2.2.1 的版本号（当时只有 Windows 包），
 > 那些版本从未对外发布，内容已全部并入 1.0.0，版本号从 1.0.0 重新起算。
 
+## 1.0.0 构建更新（2026-11-19）
+
+Win7 专用版安装版已在目标机器实测通过。本次把仓库与 `v1.0.0` Release 的**全部资产**同步到同一份源码。
+
+- **Win7 专用版源码纳入仓库**：此前 Release 只有二进制，源码副本一直游离在仓库之外；现新增 `launchplay-win7/` 目录，含完整 `src/`、`package.json` / lock、品牌图标、构建工具与 `Win7版说明.md`。与主版本差异仅限 Electron 22.3.27、`productName`、appId（`com.launchplay.desktop.win7`）与数据目录（`LaunchPlayWin7Data`）。
+- **Linux 资产重建**：`AppImage` / `tar.gz` 用最新提交在 CI 的 Ubuntu runner 上重新构建并替换 Release 资产（此前线上仍是首次发布版本）。包内 `app.asar` 已与仓库源码逐文件比对一致，仅存在 CI 的 LF 换行与 electron-builder 对 `package.json` 的标准裁剪差异。
+- **Windows 四个资产与 `latest.yml` 保持不变**：线上 SHA-256 与已实测通过的 v10 构建完全一致，未重复上传。
+- 发布说明补齐全部六个资产的 SHA-256；README 补上 Win7 源码目录与构建方式。
+
 ## 1.0.0 构建更新（2026-11-18）
 
-本次为同一 `v1.0.0` Release 的重新构建，替换全部 Windows 安装包；Linux 资产仍由 CI 构建。
+本次为同一 `v1.0.0` Release 的重新构建，替换全部 Windows 安装包；Linux 资产随后于 11-19 一并重建。
 
 ### 新增
 

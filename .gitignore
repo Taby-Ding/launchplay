@@ -8,6 +8,8 @@ release_old/
 dist/
 out/
 build/electron-dist/
+# Win7 专用版副本（launchplay-win7/）同样只提交源码，不提交内核分发与构建产物
+**/build/electron-dist/
 
 # 运行数据（便携版会在 exe 同级生成）
 LaunchPlayData/
