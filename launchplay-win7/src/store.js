@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DEFAULT_SETTINGS = {
   autostart: true,
@@ -26,6 +27,11 @@ const DEFAULT_SETTINGS = {
   weatherCity: 'auto',
   // 手机遥控万能键：最多 4 个，{ name: '显示名', combo: ['ctrl','alt','f5'] }
   customKeys: [],
+  // 手机遥控的长期配对：
+  //   pairSecret 落盘固定（二维码里只带它，不再每次启动随机换 6 位码）
+  //   devices 是已配对手机白名单，每条 { id, name, token, createdAt, lastSeen }
+  //   手机本地只存自己的 token；电脑端可单独撤销或整体清空。
+  remote: { pairSecret: '', devices: [] },
   // 家长守护：密码哈希只存主进程，渲染层拿到的是脱敏后的副本
   parental: {
     enabled: false,
@@ -55,7 +61,11 @@ const DEFAULT_SETTINGS = {
 //   5 -> 6 : 开机自启改为默认开启
 //   6 -> 7 : 引入天气城市、家长守护配置
 //   7 -> 8 : 天气改省市两级 9 位编码；家长守护改现实时间计时 + 轻量加固；新增万能键
-const SCHEMA_VERSION = 8;
+//   8 -> 9 : 手机遥控改为落盘固定配对凭证 + 可撤销设备白名单
+const SCHEMA_VERSION = 9;
+
+/** 生成遥控配对凭证（32 字节随机十六进制，48 位字符） */
+function newPairSecret() { return crypto.randomBytes(24).toString('hex'); }
 
 /** v7 的城市 id -> v8 的 9 位编码，保证老用户升级后天气设置不丢 */
 const LEGACY_CITY_CODES = {
@@ -91,12 +101,23 @@ class Store {
           ...DEFAULT_SETTINGS.parental,
           ...((parsed.settings && parsed.settings.parental) || {}),
         };
+        this.data.settings.remote = {
+          ...DEFAULT_SETTINGS.remote,
+          ...((parsed.settings && parsed.settings.remote) || {}),
+        };
         this.data.firstRun = parsed.firstRun !== false;
         if (typeof parsed.version === 'number') this.data.version = parsed.version;
         this.migrate();
       }
     } catch {
       /* 首次运行或文件损坏 —— 使用默认值 */
+    }
+    // 首次运行不会走 migrate()，这里兜底生成遥控配对凭证
+    const r = this.data.settings.remote;
+    if (!r || typeof r !== 'object') this.data.settings.remote = { pairSecret: '', devices: [] };
+    if (!/^[0-9a-f]{48}$/.test(this.data.settings.remote.pairSecret)) {
+      this.data.settings.remote.pairSecret = newPairSecret();
+      this.save();
     }
     return this.data;
   }
@@ -159,6 +180,17 @@ class Store {
       this.data.version = 8;
       this.save();
     }
+    if (this.data.version < 9) {
+      const s = this.data.settings;
+      const r = s.remote && typeof s.remote === 'object' ? s.remote : {};
+      if (typeof r.pairSecret !== 'string' || !/^[0-9a-f]{48}$/.test(r.pairSecret)) {
+        r.pairSecret = newPairSecret();
+      }
+      r.devices = Array.isArray(r.devices) ? r.devices.filter((d) => d && typeof d.token === 'string' && d.token) : [];
+      s.remote = { ...DEFAULT_SETTINGS.remote, ...r };
+      this.data.version = 9;
+      this.save();
+    }
   }
 
   save() {
@@ -191,4 +223,4 @@ class Store {
   set firstRun(v) { this.data.firstRun = !!v; }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS };
+module.exports = { Store, DEFAULT_SETTINGS, newPairSecret };

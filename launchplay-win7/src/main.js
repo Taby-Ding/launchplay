@@ -21,6 +21,7 @@ const { launchItem } = require('./launch');
 const { media } = require('./media');
 const { winInput, VK } = require('./wininput');
 const { RemoteService } = require('./remote');
+const { DiscoveryService } = require('./discovery');
 const taskbar = require('./taskbar');
 const updater = require('./updater');
 const weather = require('./weather');
@@ -129,6 +130,7 @@ let splashPainted = false; // splash 内容是否已 did-finish-load(避免白�
 let mainReady = false;     // 主窗口是否已 ready-to-show
 let hotkeyOk = false;   // 唤回热键是否注册成功(没注册成功就不自动收起, 免得回不来)
 let remote = null;      // 手机遥控服务(默认关闭, 设置里点开启才启动)
+let discovery = null;   // 遥控服务的 UDP 广播发现(失败不影响遥控)
 let guard = null;       // 家长守护服务(主进程计时 + 密码校验)
 let forceQuit = false;  // 系统关机 / app.quit() 已发起，此时不再拦窗口关闭
 let lastLaunchedPid = 0; // 最近一次由启动台打开的程序 pid, 供手机"关闭程序"使用
@@ -810,6 +812,7 @@ function setupIpc() {
 
   ipcMain.handle('remote:stop', () => {
     if (remote) remote.stop();
+    if (discovery) { discovery.stop(); discovery = null; }
     return { ok: true, running: false };
   });
 
@@ -819,7 +822,21 @@ function setupIpc() {
 
   ipcMain.handle('remote:rotate', () => {
     if (!remote || !remote.running) return { ok: false, error: '遥控服务未开启' };
-    return { ok: true, ...remote.rotateToken() };
+    return { ok: true, ...remote.rotatePairing() };
+  });
+
+  // 已配对设备白名单：列表不含令牌，撤销后立即生效（手机下一条指令就会被拒绝）
+  ipcMain.handle('remote:devices', () => ({
+    ok: true,
+    devices: remote ? remote.listDevices() : [],
+  }));
+  ipcMain.handle('remote:revoke', (_e, id) => {
+    if (!remote) return { ok: false, error: '遥控服务未开启' };
+    return remote.revokeDevice(String(id || ''));
+  });
+  ipcMain.handle('remote:revoke-all', () => {
+    if (!remote) return { ok: false, error: '遥控服务未开启' };
+    return remote.revokeAll();
   });
 
   /* ---- 左上角天气 ---- */
@@ -877,6 +894,7 @@ function setupIpc() {
 async function startRemoteService() {
   if (!remote) {
     remote = new RemoteService(handleRemoteAction);
+    remote.setStore(store); // 配对凭证与设备白名单落盘，重启后继续有效
     remote.setPage(remotePageHtml());
     // 让 /ping 能回显启动台是否在前台，手机页据此自动跳回导航卡片
     remote.setFrontProvider(launcherActive);
@@ -893,7 +911,15 @@ async function startRemoteService() {
         .filter((k) => k.has),
     }));
   }
-  return remote.start();
+  const info = await remote.start();
+  // UDP 广播只用于发现；Win7 防火墙拦截时内部会吞掉异常，不影响 HTTP 遥控
+  if (!discovery) {
+    discovery = new DiscoveryService(() => ({
+      host: info.address, port: info.port, name: '影游快启',
+    }));
+    discovery.start();
+  }
+  return info;
 }
 
 /**
@@ -1158,6 +1184,7 @@ if (!gotLock) {
     try { if (taskbar.isActive(DATA_DIR)) taskbar.restore(DATA_DIR, true); } catch { /* ignore */ }
     try { globalShortcut.unregisterAll(); } catch {}
     try { if (remote) remote.stop(); } catch { /* ignore */ }
+    try { if (discovery) discovery.stop(); } catch { /* ignore */ }
     try { winInput.stop(); } catch { /* ignore */ }
     stopBoost();
   });

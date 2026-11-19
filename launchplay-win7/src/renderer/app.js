@@ -1950,11 +1950,11 @@ function bindRemoteBadge() {
 }
 
 /**
- * 打开/刷新"手机遥控"面板：开启服务、显示二维码与配对码。
- * 服务开启后会一直运行直到主动停止或关闭程序；关掉这个弹窗不影响连接。
+ * 打开/刷新"手机遥控"面板：开启服务、显示二维码、管理已配对设备。
+ * 首次扫码后会得到长期令牌，手机不用每次扫码；这里可以撤销单台或全部设备。
  */
-async function openPhoneRemote(rotate) {
-  toast(rotate ? '正在更换配对码…' : '正在开启遥控服务…', 'ok', 1200);
+async function openPhoneRemote(rotate, silent) {
+  if (!silent) toast(rotate ? '正在更换配对凭证…' : '正在开启遥控服务…', 'ok', 1200);
   let info;
   if (rotate) {
     info = await api.remoteRotate();
@@ -1973,11 +1973,22 @@ async function openPhoneRemote(rotate) {
   }
   showRemoteBadge(info); // 大屏角落常驻二维码
 
+  const deviceResult = api.remoteDevices ? await api.remoteDevices() : null;
+  const devices = (deviceResult && deviceResult.devices) || [];
+  const deviceHtml = devices.length
+    ? devices.map((d) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line,#2a3452);border-radius:8px;margin-top:6px;text-align:left">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || '手机')}</span>
+          <span style="font-size:11px;opacity:.6">${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('zh-CN')) : '未连接'}</span>
+          <button class="btn" style="padding:4px 10px;font-size:12px" data-r-action="revoke" data-id="${esc(d.id)}" data-focusable>撤销</button>
+        </div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted,#93a0c4);margin-top:8px">还没有配对过的手机</div>';
+
   openModal(`
     <div class="m-head">
       <div>
         <div class="m-title">手机遥控</div>
-        <div class="m-sub">手机扫码即可把大屏"握在手里"</div>
+        <div class="m-sub">首次扫码配对后，这台手机以后不用再扫码</div>
       </div>
       <button class="btn btn-icon-only" data-close data-focusable title="关闭">✕</button>
     </div>
@@ -1985,7 +1996,7 @@ async function openPhoneRemote(rotate) {
       <div style="display:inline-block;background:#fff;padding:12px;border-radius:14px;line-height:0">
         <img src="${qrDataUri(info.qrSvg)}" alt="扫码遥控二维码" style="width:216px;height:216px" />
       </div>
-      <div style="font-size:15px;font-weight:600;margin-top:14px">用手机相机扫码打开遥控页</div>
+      <div style="font-size:15px;font-weight:600;margin-top:14px">新手机：用相机扫这个码</div>
       <div style="font-size:13px;color:var(--muted,#93a0c4);margin-top:8px;line-height:1.7">
         若扫不出来，可在手机浏览器手动输入：<br/>
         <span style="font-family:monospace;word-break:break-all;user-select:text">${esc(info.url)}</span>
@@ -1995,14 +2006,19 @@ async function openPhoneRemote(rotate) {
         <span style="font-family:monospace">${esc(info.address)}:${esc(info.port)}</span>
       </div>
       <div style="font-size:12px;color:var(--muted,#93a0c4);margin-top:14px;line-height:1.8;text-align:left">
-        · 手机必须与电脑连接<strong>同一个 WiFi</strong><br/>
-        · 首次开启时 Windows 可能弹出防火墙提示，请勾选"专用网络"并允许<br/>
-        · 配对码每次开启随机生成，别人扫到也无法控制<br/>
-        · 地址随网络变化；换网络后请重新打开此页获取新二维码
+        · 手机与电脑要在<strong>同一个 WiFi</strong>；首次弹出防火墙提示请勾选"专用网络"<br/>
+        · 配对凭证固定保存，换网络后手机会自动找电脑，不用重新扫码<br/>
+        · "换二维码"只让新扫码生效；已配对手机不受影响<br/>
+        · 想让某台手机立刻失效，请点下面设备右侧的"撤销"
+      </div>
+      <div style="margin-top:16px;text-align:left">
+        <div style="font-size:13px;font-weight:600">已配对设备（${devices.length}/8）</div>
+        ${deviceHtml}
       </div>
     </div>
     <div class="m-foot" style="justify-content:center;gap:10px;flex-wrap:wrap">
-      <button class="btn" data-r-action="rotate" data-focusable>换一个配对码</button>
+      <button class="btn" data-r-action="rotate" data-focusable>换二维码</button>
+      <button class="btn" data-r-action="revoke-all" data-focusable>撤销全部设备</button>
       <button class="btn" data-r-action="stop" data-focusable>停止遥控</button>
       <button class="btn btn-primary" data-close data-focusable>完成</button>
     </div>
@@ -2012,8 +2028,21 @@ async function openPhoneRemote(rotate) {
   $('#modal').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-r-action]');
     if (!b) return;
-    if (b.dataset.rAction === 'rotate') { await openPhoneRemote(true); return; }
-    if (b.dataset.rAction === 'stop') {
+    const action = b.dataset.rAction;
+    if (action === 'rotate') { await openPhoneRemote(true); return; }
+    if (action === 'revoke') {
+      const r = api.remoteRevoke ? await api.remoteRevoke(b.dataset.id) : null;
+      toast(r && r.ok ? '已撤销该设备，手机下次发指令会失效' : '撤销失败', r && r.ok ? 'ok' : 'err', 2200);
+      await openPhoneRemote(false, true);
+      return;
+    }
+    if (action === 'revoke-all') {
+      const r = api.remoteRevokeAll ? await api.remoteRevokeAll() : null;
+      toast(r && r.ok ? '已撤销全部设备，需要重新扫码配对' : '撤销失败', r && r.ok ? 'ok' : 'err', 2200);
+      await openPhoneRemote(false, true);
+      return;
+    }
+    if (action === 'stop') {
       await api.remoteStop();
       // 主动停止：取消常驻，下次启动不再自动开启
       if (state.settings.remoteAlwaysOn !== false) {

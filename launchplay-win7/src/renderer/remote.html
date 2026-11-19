@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="遥控" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon.png" />
   <title>影游快启 · 手机遥控</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -35,6 +40,7 @@
     .dot { width: calc(7px * var(--rs, 1)); height: calc(7px * var(--rs, 1)); border-radius: 50%; background: var(--muted); }
     .dot.on { background: var(--ok); box-shadow: 0 0 0 calc(3px * var(--rs, 1)) rgba(67,217,163,.16); }
     .dot.err { background: var(--danger); }
+    .dot.wait { background: #ef9f27; }
 
     .card {
       background: var(--surface); border: 1px solid var(--line);
@@ -140,17 +146,17 @@
       color: #ffb3b3; border-radius: calc(12px * var(--rs, 1)); padding: calc(10px * var(--rs, 1)) calc(12px * var(--rs, 1)); font-size: calc(24px * var(--rs, 1)); line-height: 1.6;
     }
     .err-banner.show { display: block; }
-  
-    /* 字号切换按钮与万能键 */
+
+    /* 字号切换、常亮、振动、重连 */
+    .toggle-row { display: flex; flex-wrap: wrap; gap: calc(8px * var(--rs, 1)); justify-content: center; margin-top: calc(12px * var(--rs, 1)); }
     .size-toggle {
-      margin-top: calc(12px * var(--rs, 1));
       border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
       border-radius: calc(999px * var(--rs, 1)); cursor: pointer;
       padding: calc(8px * var(--rs, 1)) calc(20px * var(--rs, 1));
       font-size: calc(22px * var(--rs, 1)); min-height: 40px;
       touch-action: manipulation;
     }
-    .size-toggle:active { background: var(--accent); color: #fff; }
+    .size-toggle:active, .size-toggle.active { background: var(--accent); color: #fff; }
     .macro-empty { font-size: calc(22px * var(--rs, 1)); color: var(--muted); }
 </style>
 </head>
@@ -159,7 +165,12 @@
     <header>
       <div class="brand">影游快启 <small>手机遥控</small></div>
       <div id="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></div>
-      <button class="size-toggle" id="sizeBtn" type="button">大字版 · 切标准版</button>
+      <div class="toggle-row">
+        <button class="size-toggle" id="sizeBtn" type="button">大字版 · 切标准版</button>
+        <button class="size-toggle" id="wakeBtn" type="button">屏幕常亮：开</button>
+        <button class="size-toggle" id="buzzBtn" type="button">按键振动：开</button>
+        <button class="size-toggle" id="retryBtn" type="button">重新连接</button>
+      </div>
     </header>
 
     <div class="err-banner" id="errBanner"></div>
@@ -261,7 +272,7 @@
       </div>
     </div>
 
-    <div class="foot">与电脑连接同一 WiFi 即可使用<br/>指令仅在本地网络传输，不会上传任何数据</div>
+    <div class="foot">首次扫码配对后长期有效 · 换网络会自动找电脑<br/>指令仅在本地网络传输，不会上传任何数据</div>
   </div>
 
   <div class="confirm" id="confirm">
@@ -278,32 +289,89 @@
   <script>
     (function () {
       'use strict';
-      // 配对码从网址 ?t= 里读，每条指令都带上；电脑端校验不过就不会执行
-      var token = new URLSearchParams(location.search).get('t') || '';
+
+      /* ---- 本地保存的配对信息：换网络 / 重启 / 熄屏后都靠它们恢复 ---- */
+      var PAIR_KEY = 'lp_remote_pair';    // 二维码里的配对凭证（只用于首次换取设备令牌）
+      var TOKEN_KEY = 'lp_remote_token';  // 这台手机的设备令牌
+      var HOST_KEY = 'lp_remote_host';    // 电脑的局域网地址 host:port
+      var SIZE_KEY = 'lp_remote_size';
+      var WAKE_KEY = 'lp_remote_wake';
+      var BUZZ_KEY = 'lp_remote_buzz';
+      var DEFAULT_PORT = 18765;
+
+      function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+      function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+      function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+      function normalizeHost(h) {
+        h = String(h || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+        if (!h) return '';
+        if (h.indexOf(':') === -1) h += ':' + DEFAULT_PORT;
+        return h;
+      }
+
+      var qs = new URLSearchParams(location.search);
+      var pairSecret = qs.get('p') || lsGet(PAIR_KEY);
+      if (qs.get('p')) {
+        pairSecret = qs.get('p');
+        lsSet(PAIR_KEY, pairSecret);
+        lsSet(HOST_KEY, normalizeHost(location.host));
+      }
+      var token = lsGet(TOKEN_KEY);
+      var host = normalizeHost(lsGet(HOST_KEY)) || normalizeHost(location.host);
+      var base = 'http://' + host;
+
       var dot = document.getElementById('dot');
       var statusText = document.getElementById('statusText');
       var errBanner = document.getElementById('errBanner');
       var confirmedAction = null;
       var busy = false;
       var failCount = 0;
+      var connected = false;
+      var connecting = false;
+      var lastScanAt = 0;
 
-      // 字号：大字版 = 当前尺寸（最初版 2 倍）；标准版 = 最初版 1.5 倍，即大字版的 0.75。
-      // 切换 --rs 后字号、间距、按钮高度、触摸板、图标一起等比缩放；每台手机各自记住选择。
-      var SIZE_KEY = 'lp_remote_size';
+      // 字号：大字版 = 当前尺寸；标准版 = 最初版 1.5 倍，即大字版的 0.75。
       function applySize(mode) {
         var std = mode === 'standard';
         document.documentElement.setAttribute('data-size', std ? 'standard' : 'large');
         var btn = document.getElementById('sizeBtn');
         if (btn) btn.textContent = std ? '标准版 · 切大字版' : '大字版 · 切标准版';
-        try { localStorage.setItem(SIZE_KEY, std ? 'standard' : 'large'); } catch (e) {}
+        lsSet(SIZE_KEY, std ? 'standard' : 'large');
       }
-      var savedSize = 'large';
-      try { savedSize = localStorage.getItem(SIZE_KEY) || 'large'; } catch (e) {}
-      applySize(savedSize);
+      applySize(lsGet(SIZE_KEY) || 'large');
       document.getElementById('sizeBtn').addEventListener('click', function () {
-        var std = document.documentElement.getAttribute('data-size') === 'standard';
-        applySize(std ? 'large' : 'standard');
+        applySize(document.documentElement.getAttribute('data-size') === 'standard' ? 'large' : 'standard');
       });
+
+      // 屏幕常亮：支持 Wake Lock 的浏览器会保持屏幕不熄；不支持的只显示状态。
+      var wakeEnabled = lsGet(WAKE_KEY) !== '0';
+      var wakeLock = null;
+      var wakeBtn = document.getElementById('wakeBtn');
+      function renderWakeBtn() { wakeBtn.textContent = '屏幕常亮：' + (wakeEnabled ? '开' : '关'); wakeBtn.classList.toggle('active', wakeEnabled); }
+      function acquireWake() {
+        if (!wakeEnabled || !navigator.wakeLock || document.hidden) return;
+        try {
+          navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; }).catch(function () {});
+        } catch (e) {}
+      }
+      function releaseWake() {
+        if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+      }
+      renderWakeBtn();
+      acquireWake();
+      wakeBtn.addEventListener('click', function () {
+        wakeEnabled = !wakeEnabled;
+        lsSet(WAKE_KEY, wakeEnabled ? '1' : '0');
+        renderWakeBtn();
+        if (wakeEnabled) acquireWake(); else releaseWake();
+      });
+
+      var buzzEnabled = lsGet(BUZZ_KEY) !== '0';
+      var buzzBtn = document.getElementById('buzzBtn');
+      function renderBuzzBtn() { buzzBtn.textContent = '按键振动：' + (buzzEnabled ? '开' : '关'); buzzBtn.classList.toggle('active', buzzEnabled); }
+      renderBuzzBtn();
+      buzzBtn.addEventListener('click', function () { buzzEnabled = !buzzEnabled; lsSet(BUZZ_KEY, buzzEnabled ? '1' : '0'); renderBuzzBtn(); });
 
       // 万能键：手机页只显示名字，具体按键组合保存在电脑端，不下发到手机
       var macroSig = null;
@@ -329,7 +397,7 @@
       }
 
       function setStatus(state, text) {
-        dot.className = 'dot' + (state === 'on' ? ' on' : state === 'err' ? ' err' : '');
+        dot.className = 'dot' + (state === 'on' ? ' on' : state === 'err' ? ' err' : state === 'wait' ? ' wait' : '');
         statusText.textContent = text;
       }
       function showError(text) {
@@ -338,51 +406,186 @@
         setStatus('err', '连接失败');
       }
       function clearError() { errBanner.classList.remove('show'); }
+      function flash(el) { el.classList.add('press'); setTimeout(function () { el.classList.remove('press'); }, 110); }
+      function buzz() { try { if (buzzEnabled && navigator.vibrate) navigator.vibrate(12); } catch (e) {} }
 
-      function flash(el) {
-        el.classList.add('press');
-        setTimeout(function () { el.classList.remove('press'); }, 110);
+      /* ---- 通用请求：跨域探测电脑，带超时 ---- */
+      function request(url, opts, timeoutMs) {
+        opts = opts || {};
+        opts.mode = 'cors';
+        opts.cache = 'no-store';
+        if (opts.body && typeof opts.body !== 'string') {
+          opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+          opts.body = JSON.stringify(opts.body);
+        }
+        var ctrl = null;
+        if (typeof AbortController !== 'undefined') { ctrl = new AbortController(); opts.signal = ctrl.signal; }
+        var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 4000);
+        return fetch(url, opts).then(function (r) {
+          return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; })
+            .then(function (j) { return { status: r.status, j: j }; });
+        }).then(function (res) { clearTimeout(timer); return res; }, function (e) { clearTimeout(timer); throw e; });
       }
-      function buzz() { try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {} }
 
+      function pair() {
+        if (!pairSecret) return Promise.resolve(false);
+        return request(base + '/pair', {
+          method: 'POST', body: { p: pairSecret, name: '手机遥控' }
+        }, 4000).then(function (res) {
+          if (res.j && res.j.ok && res.j.token) {
+            token = res.j.token;
+            lsSet(TOKEN_KEY, token);
+            return true;
+          }
+          return false;
+        }).catch(function () { return false; });
+      }
+
+      function checkHost(h) {
+        return request('http://' + h + '/ping?t=' + encodeURIComponent(token || ''), {}, 1200)
+          .then(function (res) {
+            if (!res.j || res.j.app !== 'LaunchPlay') return false;
+            host = h; base = 'http://' + h;
+            lsSet(HOST_KEY, h);
+            if (!res.j.authorized) {
+              // 有令牌却被拒绝：说明被撤销/凭证已轮换，必须重新扫码，不能悄悄重新配对
+              if (token) {
+                token = ''; pairSecret = '';
+                lsDel(TOKEN_KEY); lsDel(PAIR_KEY);
+                showError('这台手机已被撤销，请重新扫描电脑上的二维码');
+                return false;
+              }
+              return pair();
+            }
+            return true;
+          }).catch(function () { return false; });
+      }
+
+      /* ---- 自动发现：手机浏览器不能发 UDP，所以用 WebRTC 拿本机 IP + HTTP 网段探测 ---- */
+      function localIp() {
+        return new Promise(function (resolve) {
+          var pc = null, done = false;
+          function finish(v) { if (done) return; done = true; try { if (pc) pc.close(); } catch (e) {} resolve(v || ''); }
+          try {
+            pc = new RTCPeerConnection({ iceServers: [] });
+            pc.onicecandidate = function (e) {
+              var c = (e && e.candidate && e.candidate.candidate) || '';
+              var m = /(\d{1,3}(?:\.\d{1,3}){3})/.exec(c);
+              if (m && !/^127\./.test(m[1]) && !/^169\.254\./.test(m[1])) finish(m[1]);
+            };
+            pc.createDataChannel('lp');
+            pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () { finish(''); });
+          } catch (e) { finish(''); return; }
+          setTimeout(function () { finish(''); }, 2000);
+        });
+      }
+
+      function scanHosts(list) {
+        return new Promise(function (resolve) {
+          var found = null, next = 0, active = 0, finished = false;
+          function done(result) {
+            if (finished) return;
+            finished = true;
+            resolve(result);
+          }
+          function worker() {
+            if (found || finished) return;
+            if (next >= list.length) {
+              if (active === 0) done(null);
+              return;
+            }
+            active++;
+            var h = list[next++];
+            checkHost(h).then(function (ok) {
+              active--;
+              if (ok && !found) { found = h; done(h); return; }
+              worker();
+            });
+          }
+          for (var i = 0; i < 16 && i < list.length; i++) worker();
+        });
+      }
+
+      function discover() {
+        var now = Date.now();
+        if (now - lastScanAt < 12000) return Promise.resolve(false); // 扫描很吵，12 秒内不重复
+        lastScanAt = now;
+        setStatus('wait', '正在寻找电脑…');
+        return localIp().then(function (ip) {
+          var seed = ip || (host.split(':')[0] || '');
+          var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(seed);
+          if (!m) return false;
+          var prefix = m[1] + '.' + m[2] + '.' + m[3];
+          // 家用路由器常把 DHCP 地址分配在 .100-.150，先扫这段，通常几百毫秒就能找到
+          var priority = [1, 2, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+            111, 112, 113, 114, 115, 116, 117, 118, 119, 120];
+          var list = priority.map(function (n) { return prefix + '.' + n + ':' + DEFAULT_PORT; });
+          for (var i = 1; i <= 254; i++) {
+            if (priority.indexOf(i) !== -1) continue;
+            list.push(prefix + '.' + i + ':' + DEFAULT_PORT);
+          }
+          return scanHosts(list).then(function (h) { return !!h; });
+        }).catch(function () { return false; });
+      }
+
+      function connect(force) {
+        if (connecting) return Promise.resolve(false);
+        connecting = true;
+        setStatus('wait', '连接中…');
+        return (force ? Promise.resolve(false) : checkHost(host)).then(function (ok) {
+          if (ok) return true;
+          return discover();
+        }).then(function (ok) {
+          connecting = false;
+          if (ok) {
+            connected = true; failCount = 0; clearError();
+            setStatus('on', '已连接 · 就绪');
+          } else {
+            connected = false;
+            setStatus('err', '未找到电脑');
+            showError('还没找到电脑：请确认电脑端影游快启正在运行、手机和电脑在同一 WiFi。若刚换过网络，请再扫一次电脑上的二维码。');
+          }
+          return ok;
+        });
+      }
+
+      /* ---- 指令 ---- */
       function send(action, extra) {
-        if (!token) { showError('网址缺少配对码，请重新扫描电脑上的二维码。'); return; }
+        if (!token) {
+          showError('还没有配对成功，请重新扫描电脑上的二维码。');
+          connect(true);
+          return;
+        }
         if (busy) return;
         busy = true;
         var body = { t: token, action: action };
         if (extra && typeof extra === 'object') {
           for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) body[k] = extra[k];
         }
-        fetch('/cmd', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }).then(function (r) {
-          return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; }).then(function (j) {
-            return { status: r.status, j: j };
-          });
-        }).then(function (res) {
+        request(base + '/cmd', { method: 'POST', body: body }, 5000).then(function (res) {
           if (res.j.ok) {
-            failCount = 0;
-            clearError();
+            connected = true; failCount = 0; clearError();
             setStatus('on', '已连接 · 就绪');
           } else if (res.status === 403) {
-            showError('配对码已失效，请在电脑上重新开启手机遥控并扫描新二维码。');
+            // 被撤销：必须重新扫码，不能自动重新配对，否则撤销就失去意义
+            token = ''; pairSecret = '';
+            lsDel(TOKEN_KEY); lsDel(PAIR_KEY);
+            showError(res.j.error || '设备已被撤销，请重新扫码配对');
           } else {
             showError('指令未成功：' + (res.j.error || ('HTTP ' + res.status)));
           }
-        }).catch(function (e) {
+        }).catch(function () {
           failCount++;
-          if (failCount >= 2) showError('连不上电脑，请确认：手机和电脑在同一 WiFi；电脑上的 LaunchPlay 仍在运行。');
+          connected = false;
+          if (failCount >= 2) { showError('连不上电脑，正在自动重新寻找…'); connect(true); }
           else setStatus('err', '连接中断，重试中…');
-        }).finally(function () { busy = false; });
+        }).then(function () { busy = false; });
       }
 
       // 鼠标移动：把位移累积起来按固定节拍冲刷，既不丢帧也不发爆请求。
-      // 之前是"超时/busy 就直接丢弃"，快速滑动时大部分位移被丢掉，所以显得很慢。
       var movePendingX = 0, movePendingY = 0;
       var moveInFlight = false;
-      var MOVE_INTERVAL = 16; // ~60fps 冲刷一次
+      var MOVE_INTERVAL = 16;
       function flushMove() {
         if (moveInFlight || !token) return;
         var dx = Math.max(-800, Math.min(800, Math.round(movePendingX)));
@@ -390,27 +593,16 @@
         movePendingX = 0; movePendingY = 0;
         if (!dx && !dy) return;
         moveInFlight = true;
-        fetch('/cmd', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ t: token, action: 'mmove', dx: dx, dy: dy })
-        }).catch(function () {}).finally(function () { moveInFlight = false; });
+        request(base + '/cmd', { method: 'POST', body: { t: token, action: 'mmove', dx: dx, dy: dy } }, 4000)
+          .catch(function () {}).then(function () { moveInFlight = false; });
       }
-      function sendMove(dx, dy) {
-        if (!token) return;
-        movePendingX += dx; movePendingY += dy;
-        flushMove();
-      }
+      function sendMove(dx, dy) { if (!token) return; movePendingX += dx; movePendingY += dy; flushMove(); }
       setInterval(flushMove, MOVE_INTERVAL);
 
-      // 普通按键：立即发送
       document.querySelectorAll('[data-action]').forEach(function (el) {
-        el.addEventListener('click', function () {
-          flash(el); buzz(); send(el.getAttribute('data-action'));
-        });
+        el.addEventListener('click', function () { flash(el); buzz(); send(el.getAttribute('data-action')); });
       });
 
-      // 危险操作：先弹确认
       var confirmBox = document.getElementById('confirm');
       document.querySelectorAll('[data-confirm]').forEach(function (el) {
         el.addEventListener('click', function () {
@@ -421,9 +613,7 @@
           confirmBox.classList.add('show');
         });
       });
-      document.getElementById('cCancel').addEventListener('click', function () {
-        confirmBox.classList.remove('show'); confirmedAction = null;
-      });
+      document.getElementById('cCancel').addEventListener('click', function () { confirmBox.classList.remove('show'); confirmedAction = null; });
       document.getElementById('cGo').addEventListener('click', function () {
         confirmBox.classList.remove('show');
         if (confirmedAction) { send(confirmedAction); confirmedAction = null; }
@@ -432,7 +622,6 @@
         if (e.target === confirmBox) { confirmBox.classList.remove('show'); confirmedAction = null; }
       });
 
-      // 鼠标辅助按钮（左键/右键/滚轮）
       document.querySelectorAll('[data-mouse]').forEach(function (el) {
         el.addEventListener('click', function () {
           flash(el); buzz();
@@ -444,14 +633,10 @@
         });
       });
 
-      // 键盘快捷键
       document.querySelectorAll('[data-key]').forEach(function (el) {
-        el.addEventListener('click', function () {
-          flash(el); buzz(); send('key', { key: el.getAttribute('data-key') });
-        });
+        el.addEventListener('click', function () { flash(el); buzz(); send('key', { key: el.getAttribute('data-key') }); });
       });
 
-      // 文本输入
       var kbText = document.getElementById('kbText');
       function submitText() {
         var v = kbText.value;
@@ -461,37 +646,25 @@
         buzz();
       }
       document.getElementById('kbSend').addEventListener('click', submitText);
-      kbText.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); submitText(); }
-      });
+      kbText.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitText(); } });
 
       // 触摸板：滑动=移动光标，轻点=左键，长按=右键
       (function () {
         var pad = document.getElementById('touchpad');
-        var dot = document.getElementById('tpDot');
+        var pdot = document.getElementById('tpDot');
         var activeId = null;
-        var lastX = 0, lastY = 0;
-        var startX = 0, startY = 0;
-        var longPressTimer = null;
-        var didMove = false;
-        var didLongPress = false;
-        var SENS = 2.6; // 手指位移 -> 屏幕上鼠标位移的放大系数（调大后滑动更跟手）
-
+        var lastX = 0, lastY = 0, startX = 0, startY = 0;
+        var longPressTimer = null, didMove = false, didLongPress = false;
+        var SENS = 2.6;
         function pointerDown(e) {
           if (activeId !== null) return;
           activeId = e.pointerId;
-          lastX = startX = e.clientX;
-          lastY = startY = e.clientY;
+          lastX = startX = e.clientX; lastY = startY = e.clientY;
           didMove = false; didLongPress = false;
           pad.classList.add('active');
-          pad.setPointerCapture && pad.setPointerCapture(e.pointerId);
+          if (pad.setPointerCapture) pad.setPointerCapture(e.pointerId);
           longPressTimer = setTimeout(function () {
-            if (!didMove) {
-              didLongPress = true;
-              pad.classList.add('press');
-              buzz();
-              send('mrclick');
-            }
+            if (!didMove) { didLongPress = true; pad.classList.add('press'); buzz(); send('mrclick'); }
           }, 550);
           e.preventDefault();
         }
@@ -500,13 +673,11 @@
           var dx = e.clientX - lastX, dy = e.clientY - lastY;
           lastX = e.clientX; lastY = e.clientY;
           if (!didMove && Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 6) {
-            didMove = true;
-            clearTimeout(longPressTimer);
-            pad.classList.add('active');
+            didMove = true; clearTimeout(longPressTimer); pad.classList.add('active');
           }
           if (didMove) {
-            dot.style.left = (50 + (e.clientX - startX) / pad.clientWidth * 40) + '%';
-            dot.style.top = (50 + (e.clientY - startY) / pad.clientHeight * 40) + '%';
+            pdot.style.left = (50 + (e.clientX - startX) / pad.clientWidth * 40) + '%';
+            pdot.style.top = (50 + (e.clientY - startY) / pad.clientHeight * 40) + '%';
             sendMove(Math.round(dx * SENS), Math.round(dy * SENS));
           }
           e.preventDefault();
@@ -516,7 +687,7 @@
           clearTimeout(longPressTimer);
           activeId = null;
           pad.classList.remove('active', 'press');
-          dot.style.left = '50%'; dot.style.top = '50%';
+          pdot.style.left = '50%'; pdot.style.top = '50%';
           if (!didMove && !didLongPress) { buzz(); send('mclick'); }
           e.preventDefault();
         }
@@ -526,9 +697,7 @@
         pad.addEventListener('pointercancel', pointerUp);
       })();
 
-      // 自动把对应卡片滚到最上方（第一次只记录基线，不滚动）：
-      //   · launchSeq 变大（打开程序）      -> 播放遥控卡片
-      //   · front 由 false 变 true（启动台回到最上层） -> 导航卡片
+      /* ---- 自动跟随：打开程序跳播放遥控，启动台回前台跳导航 ---- */
       var lastLaunchSeq = null;
       var lastFront = null;
       function scrollCardToTop(id) {
@@ -539,33 +708,55 @@
         buzz();
       }
       function ping() {
-        fetch('/ping').then(function (r) {
-          if (!r.ok) return;
-          if (!failCount) setStatus('on', '已连接 · 就绪');
-          return r.json().catch(function () { return null; });
-        }).then(function (j) {
-          if (!j) return;
-          renderMacros(j.customKeys);
-          // 先处理"打开程序 -> 播放遥控"
-          if (typeof j.launchSeq === 'number') {
-            if (lastLaunchSeq === null) lastLaunchSeq = j.launchSeq;
-            else if (j.launchSeq > lastLaunchSeq) { lastLaunchSeq = j.launchSeq; scrollCardToTop('cardPlay'); }
-            else if (j.launchSeq < lastLaunchSeq) { lastLaunchSeq = j.launchSeq; } // 服务重启后归零
+        if (!token || !connected) return;
+        request(base + '/ping?t=' + encodeURIComponent(token), {}, 3500).then(function (res) {
+          if (!res.j || !res.j.ok) return;
+          if (!res.j.authorized) {
+            token = ''; pairSecret = '';
+            lsDel(TOKEN_KEY); lsDel(PAIR_KEY);
+            showError('配对已失效，请重新扫码'); connect(true); return;
           }
-          // 再处理"启动台回到最上层 -> 导航"：放在后面，若同一拍两者都变，以导航为准
-          if (typeof j.front === 'boolean') {
-            if (lastFront === null) lastFront = j.front;
+          connected = true; failCount = 0; clearError();
+          setStatus('on', '已连接 · 就绪');
+          renderMacros(res.j.customKeys);
+          if (typeof res.j.launchSeq === 'number') {
+            if (lastLaunchSeq === null) lastLaunchSeq = res.j.launchSeq;
+            else if (res.j.launchSeq > lastLaunchSeq) { lastLaunchSeq = res.j.launchSeq; scrollCardToTop('cardPlay'); }
+            else if (res.j.launchSeq < lastLaunchSeq) lastLaunchSeq = res.j.launchSeq;
+          }
+          if (typeof res.j.front === 'boolean') {
+            if (lastFront === null) lastFront = res.j.front;
             else {
-              if (j.front && !lastFront) scrollCardToTop('cardNav');
-              lastFront = j.front;
+              if (res.j.front && !lastFront) scrollCardToTop('cardNav');
+              lastFront = res.j.front;
             }
           }
-        }).catch(function () { setStatus('err', '未连接'); });
+        }).catch(function () {
+          connected = false;
+          setStatus('err', '连接中断，重试中…');
+        });
       }
-      if (!token) showError('网址缺少配对码，请重新扫描电脑上的二维码。');
-      else ping();
-      // 2.5 秒一次：既能在打开程序后较快跳到播放遥控，又不会占用多少带宽（一次几十字节）
-      setInterval(ping, 2500);
+
+      document.getElementById('retryBtn').addEventListener('click', function () {
+        lastScanAt = 0;
+        connect(true);
+      });
+
+      // 熄屏唤醒 / 切回页面 / 网络恢复：立刻恢复连接和常亮
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) { acquireWake(); lastScanAt = 0; connect(true); ping(); }
+        else releaseWake();
+      });
+      window.addEventListener('pageshow', function () { acquireWake(); connect(true); });
+      window.addEventListener('focus', function () { if (!connecting) ping(); });
+      window.addEventListener('online', function () { lastScanAt = 0; connect(true); });
+      window.addEventListener('offline', function () { connected = false; setStatus('err', '网络已断开'); });
+
+      if (!pairSecret && !token) {
+        showError('请先用手机相机扫描电脑上的二维码完成首次配对。');
+      }
+      connect(!token);
+      setInterval(function () { if (!connected && !connecting) connect(true); else ping(); }, 5000);
     })();
   </script>
 </body>
