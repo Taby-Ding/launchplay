@@ -486,7 +486,6 @@ Windows 免安装版是自解压 exe，部分杀软会对这类单文件包误�
   </table>
 </div>
 
-> 说明：当前展示的是**占位示意图**（不可扫码）。项目维护者请将自己的真实收款码图片分别覆盖到 [`docs/alipay-qr.png`](docs/alipay-qr.png) 和 [`docs/wechat-qr.png`](docs/wechat-qr.png) 即可生效，README 无需改动。
 
 ## License
 
