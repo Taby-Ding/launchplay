@@ -20,7 +20,7 @@
 
 ![影游快启](docs/banner.jpg)
 
-![影游快启 主界面](docs/screenshots/main.png)
+![影游快启 主界面](docs/screenshots/main.webp)
 
 ---
 
@@ -131,11 +131,11 @@ cd LaunchPlay-1.0.0-linux-x64
 
 | 主界面 | 自定义背景 | 设置 |
 | --- | --- | --- |
-| ![主界面](docs/screenshots/main.png) | ![自定义背景](docs/screenshots/background.png) | ![设置](docs/screenshots/settings.png) |
+| ![主界面](docs/screenshots/main.webp) | ![自定义背景](docs/screenshots/background.webp) | ![设置](docs/screenshots/settings.webp) |
 
 添加应用面板：
 
-![添加应用](docs/screenshots/add.png)
+![添加应用](docs/screenshots/add.webp)
 
 ## 快速开始
 
@@ -475,11 +475,11 @@ Windows 免安装版是自解压 exe，部分杀软会对这类单文件包误�
   <table style="margin:0 auto;border:none">
     <tr>
       <td align="center" style="border:none;padding:0 18px">
-        <img src="docs/alipay-qr.png" alt="支付宝收款码" width="200" />
+        <img src="docs/alipay-qr.webp" alt="支付宝收款码" width="200" />
         <br/>支付宝
       </td>
       <td align="center" style="border:none;padding:0 18px">
-        <img src="docs/wechat-qr.png" alt="微信收款码" width="200" />
+        <img src="docs/wechat-qr.webp" alt="微信收款码" width="200" />
         <br/>微信
       </td>
     </tr>
